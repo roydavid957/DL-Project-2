@@ -7,6 +7,7 @@ from build_vocabulary import SOS_token
 USE_CUDA = torch.cuda.is_available()
 device = torch.device("cuda" if USE_CUDA else "cpu")
 
+
 class EncoderRNN(nn.Module):
     def __init__(self, hidden_size, embedding, n_layers=1, dropout=0):
         super(EncoderRNN, self).__init__()
@@ -130,10 +131,10 @@ class GreedySearchDecoder(nn.Module):
         # Prepare encoder's final hidden layer to be first hidden input to the decoder
         decoder_hidden = encoder_hidden[:self.decoder.n_layers]
         # Initialize decoder input with SOS_token
-        decoder_input = torch.ones(1, 1, device=train.device, dtype=torch.long) * SOS_token
+        decoder_input = torch.ones(1, 1, device=device, dtype=torch.long) * SOS_token
         # Initialize tensors to append decoded words to
-        all_tokens = torch.zeros([0], device=train.device, dtype=torch.long)
-        all_scores = torch.zeros([0], device=train.device)
+        all_tokens = torch.zeros([0], device=device, dtype=torch.long)
+        all_scores = torch.zeros([0], device=device)
         # Iteratively decode one word token at a time
         for _ in range(max_length):
             # Forward pass through decoder

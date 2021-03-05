@@ -1,2 +1,4 @@
 .idea/
 desktop.ini
+data
+__pycache__
