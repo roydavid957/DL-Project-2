@@ -191,6 +191,8 @@ if __name__ == "__main__":
     attn_model = 'dot'
     # attn_model = 'general'
     # attn_model = 'concat'
+
+    # Hyperparameters
     hidden_size = 500
     encoder_n_layers = 2
     decoder_n_layers = 2

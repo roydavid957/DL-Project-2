@@ -18,6 +18,10 @@ MIN_COUNT = 3  # Minimum word count threshold for trimming
 
 
 class Voc:
+    """ Vocabulary class:\n
+        - Maps words to indices, indices to words.
+        - Keeps track of count of each word, and total word count.
+    """
     def __init__(self, name):
         self.name = name
         self.trimmed = False
@@ -27,10 +31,12 @@ class Voc:
         self.num_words = 3  # Count SOS, EOS, PAD
 
     def addSentence(self, sentence):
+        """ Adds an entire sentence to the vocabulary by calling addWord on each word. """
         for word in sentence.split(' '):
             self.addWord(word)
 
     def addWord(self, word):
+        """ Adds a word to the vocabulary. """
         if word not in self.word2index:
             self.word2index[word] = self.num_words
             self.word2count[word] = 1
@@ -39,8 +45,8 @@ class Voc:
         else:
             self.word2count[word] += 1
 
-    # Remove words below a certain count threshold
     def trim(self, min_count):
+        """ Remove words below a certain count threshold """
         if self.trimmed:
             return
         self.trimmed = True
@@ -172,8 +178,8 @@ def binaryMatrix(l, value=PAD_token):
     return m
 
 
-# Returns padded input sequence tensor and lengths
 def inputVar(l, voc):
+    """ Returns padded input sequence tensor and their lengths """
     indexes_batch = [indexesFromSentence(voc, sentence) for sentence in l]
     lengths = torch.tensor([len(indexes) for indexes in indexes_batch])
     padList = zeroPadding(indexes_batch)
