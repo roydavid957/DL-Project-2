@@ -1,12 +1,14 @@
 import torch
+from torch import LongTensor, Tensor, BoolTensor
 
 import os
 import itertools
 import re
 import unicodedata
 import random
+from typing import List, Tuple, Union
 
-from format_data import corpus, corpus_name, datafile
+from format_data import corpus_name, datafile
 
 # Default word tokens
 PAD_token = 0  # Used for padding short sentences
@@ -22,21 +24,22 @@ class Voc:
         - Maps words to indices, indices to words.
         - Keeps track of count of each word, and total word count.
     """
+
     def __init__(self, name):
         self.name = name
         self.trimmed = False
         self.word2index = {}
-        self.word2count = {}
+        self.word2count = {}  # number of times the word has occurred in the dataset
         self.index2word = {PAD_token: "PAD", SOS_token: "SOS", EOS_token: "EOS"}
-        self.num_words = 3  # Count SOS, EOS, PAD
+        self.num_words = 3  # Number of words in the dictionary, also counts in SOS, EOS, PAD, hence the assignment to 3
 
-    def addSentence(self, sentence):
+    def addSentence(self, sentence: str):
         """ Adds an entire sentence to the vocabulary by calling addWord on each word. """
         for word in sentence.split(' '):
             self.addWord(word)
 
-    def addWord(self, word):
-        """ Adds a word to the vocabulary. """
+    def addWord(self, word: str):
+        """ Adds a word to the vocabulary transformed to an index, or increases the word's count in the vocabulary """
         if word not in self.word2index:
             self.word2index[word] = self.num_words
             self.word2count[word] = 1
@@ -45,8 +48,11 @@ class Voc:
         else:
             self.word2count[word] += 1
 
-    def trim(self, min_count):
-        """ Remove words below a certain count threshold """
+    def trim(self, min_count: int):
+        """
+        Remove words below a certain count threshold from the entire vocabulary,
+        and recreate the vocabulary with the remaining words.
+        """
         if self.trimmed:
             return
         self.trimmed = True
@@ -80,17 +86,51 @@ def unicodeToAscii(s):
     )
 
 
-# Lowercase, trim, and remove non-letter characters
-def normalizeString(s):
-    s = unicodeToAscii(s.lower().strip())
+def normalizeString(s: str):
+    """ Lowercase, trim, and remove non-letter characters\n
+
+     Examples:\n
+     - Ew, it's like some gross rat...
+     --> ew it s like some gross rat . . .
+
+     - "I know... I still can't get over that his name was \"\"\"Seymour.\"\"\"
+     --> i know . . . i still can t get over that his name was seymour ."""
+
+    s = s.lower().strip()
+    s = unicodeToAscii(s)
     s = re.sub(r"([.!?])", r" \1", s)
     s = re.sub(r"[^a-zA-Z.!?]+", r" ", s)
     s = re.sub(r"\s+", r" ", s).strip()
     return s
 
 
-# Read query/response pairs and return a voc object
-def readVocs(datafile, corpus_name):
+def filterPair(p: List[str]) -> bool:
+    """
+    :param p: List of query-reply sentence pairs, processed by normalizeString() and readVocs()
+            - Example: ['the money s right here ! get the key !', 'no ! you get it !']
+    :return: True iff both sentences in a pair 'p' are under the MAX_LENGTH threshold
+    """
+    # Input sequences need to preserve the last word for EOS token
+    return len(p[0].split(' ')) < MAX_LENGTH and len(p[1].split(' ')) < MAX_LENGTH
+
+
+def filterPairs(pairs: List[List[str]]) -> List[List[str]]:
+    """
+    :param pairs: The entire dataset in query-reply sentence form.
+    :return: Filtered query-reply dataset.
+    """
+    return [pair for pair in pairs if filterPair(pair)]
+
+
+# Symbol Pre-processing step 1
+def readVocs(datafile: str, corpus_name: str) -> Tuple[Voc, List[List[str]]]:
+    """
+    Read query/response pairs and return an empty Voc object with the pairs for loadPrepareData()\n
+    :param datafile: Txt file containing the conversations, e.g. "formatted_movie_lines.txt".
+    :param corpus_name: Name to be assigned to the instance of the Voc class.
+    :return: Empty Voc object and normalized list of query-reply sentence pairs
+            - Example pair from pairs: ['you d go with him !', 'don t kid yourself you know how i stand back there .']
+    """
     print("Reading lines...")
     # Read the file and split into lines
     lines = open(datafile, encoding='utf-8'). \
@@ -101,19 +141,14 @@ def readVocs(datafile, corpus_name):
     return voc, pairs
 
 
-# Returns True iff both sentences in a pair 'p' are under the MAX_LENGTH threshold
-def filterPair(p):
-    # Input sequences need to preserve the last word for EOS token
-    return len(p[0].split(' ')) < MAX_LENGTH and len(p[1].split(' ')) < MAX_LENGTH
-
-
-# Filter pairs using filterPair condition
-def filterPairs(pairs):
-    return [pair for pair in pairs if filterPair(pair)]
-
-
-# Using the functions defined above, return a populated voc object and pairs list
-def loadPrepareData(corpus, corpus_name, datafile, save_dir):
+# Symbol Pre-processing step 2
+def loadPrepareData(corpus_name: str, datafile: str) -> Tuple[Voc, List[List[str]]]:
+    """
+    Using readVocs(), return a populated voc object and a query-reply pairs list of lists.
+    :param corpus_name: Name of the Voc object.
+    :param datafile: Path to formatted dataset.
+    :return: Voc object and the dataset (pairs) before the last (trimming) symbol pre-processing step.
+    """
     print("Start preparing training data ...")
     voc, pairs = readVocs(datafile, corpus_name)
     print("Read {!s} sentence pairs".format(len(pairs)))
@@ -127,8 +162,15 @@ def loadPrepareData(corpus, corpus_name, datafile, save_dir):
     return voc, pairs
 
 
-def trimRareWords(voc, pairs, MIN_COUNT):
-    # Trim words used under the MIN_COUNT from the voc
+# Symbol Pre-processing step 3
+def trimRareWords(voc: Voc, pairs: List[List[str]], MIN_COUNT:int) -> List[List[str]]:
+    """
+    Trim words used under the MIN_COUNT from the voc and from pairs
+    :param voc: Populated and untrimmed Voc object.
+    :param pairs: Pairs that have been filtered according to their length.
+    :param MIN_COUNT: The minimum number of times the word has to appear in the vocabulary
+    :return: The trimmed pairs list. Voc object is trimmed inplace, doesn't need to be returned.
+    """
     voc.trim(MIN_COUNT)
     # Filter out pairs with trimmed words
     keep_pairs = []
@@ -157,39 +199,70 @@ def trimRareWords(voc, pairs, MIN_COUNT):
     return keep_pairs
 
 
-# Transform symbols to numbers
-def indexesFromSentence(voc, sentence):
-    return [voc.word2index[word] for word in sentence.split(' ')] + [EOS_token]
+# Number pre-processing step 0
+def indexesFromSentence(voc: Voc, sentence: str) -> List[int]:
+    """
+    Transform symbols to numbers. Preparing the data for embeddings.
+    :param voc: Populated and trimmed Voc object.
+    :param sentence: Either a query or a reply type of sentence.
+    :return: A list of words from the sentence encoded as integer numbers.
+    """
+    return [voc.word2index[word] for word in sentence.split(' ')] + [EOS_token]  # EOS_token = 2
 
 
-def zeroPadding(l, fillvalue=PAD_token):
-    return list(itertools.zip_longest(*l, fillvalue=fillvalue))
+# Number pre-processing step 1
+def zeroPadding(indexes_batch: List[List[int]], fillvalue=PAD_token) -> List[Tuple[int]]:  # PAD_token = 0
+    """
+    A function that takes a batch of word2idx encoded inputs, searches for the longest sequence in the batch and
+    pads the rest of the batch to match the longest length.
+    :param indexes_batch: Either query or reply batch of sentences.
+            Example with a batch size of 2: [[16, 937, 4, 2], [42, 2]]
+    :param fillvalue: The value used for padding.
+    :return: The indexed batches in a list of tuples, where each tuple has one element from each sentence from the same
+            position of the respective sentences.
+            E.g. (72, 276, 115, 16, 42) would be the tuple of first word from 5 distinct sentences.
+    """
+    return list(itertools.zip_longest(*indexes_batch, fillvalue=fillvalue))
 
 
-def binaryMatrix(l, value=PAD_token):
-    m = []
-    for i, seq in enumerate(l):
-        m.append([])
+# Number pre-processing step 2 (for replies)
+def binaryMatrix(replies_padlist: List[Tuple[int]]) -> List[List[bool]]:
+    """
+    A function that transforms a list of tuples with integers and transforms the integers to a binary representation.
+    Used as a mask for batches.
+    """
+    bin_matrix = []
+    for i, seq in enumerate(replies_padlist):
+        bin_matrix.append([])
         for token in seq:
             if token == PAD_token:
-                m[i].append(0)
+                bin_matrix[i].append(0)
             else:
-                m[i].append(1)
-    return m
+                bin_matrix[i].append(1)
+    return bin_matrix
 
 
-def inputVar(l, voc):
-    """ Returns padded input sequence tensor and their lengths """
-    indexes_batch = [indexesFromSentence(voc, sentence) for sentence in l]
-    lengths = torch.tensor([len(indexes) for indexes in indexes_batch])
+def inputVar(queries: List[str], voc: Voc) -> Tuple[LongTensor, Tensor]:
+    """
+    Returns padded input sequence tensor and their sentc_lengths.
+    :param queries: A batch of query sentences. Default batch_size in train.py is 64.
+    :param voc: Fully populated and pre-processed Voc object.
+    :return: Input tensor ready for embedding, length of the sentences.
+    """
+    indexes_batch = [indexesFromSentence(voc, sentence) for sentence in queries]
+    sentc_lengths = torch.tensor([len(indexes) for indexes in indexes_batch])
     padList = zeroPadding(indexes_batch)
-    padVar = torch.LongTensor(padList)
-    return padVar, lengths
+    padVar = torch.LongTensor(padList)  # |v| x D dimensional matrix for embedding; each column is a padded sentence
+    return padVar, sentc_lengths
 
 
-# Returns padded target sequence tensor, padding mask, and max target length
-def outputVar(l, voc):
-    indexes_batch = [indexesFromSentence(voc, sentence) for sentence in l]
+def outputVar(replies: List[str], voc: Voc) -> Tuple[LongTensor, BoolTensor, int]:
+    """
+    :param replies: A batch of reply sentences. Default batch_size in train.py is 64.
+    :param voc: Fully populated and pre-processed Voc object.
+    :return: Padded target sequence tensor, padding mask, and max target length
+    """
+    indexes_batch = [indexesFromSentence(voc, sentence) for sentence in replies]
     max_target_len = max([len(indexes) for indexes in indexes_batch])
     padList = zeroPadding(indexes_batch)
     mask = binaryMatrix(padList)
@@ -199,20 +272,31 @@ def outputVar(l, voc):
 
 
 # Returns all items for a given batch of pairs
-def batch2TrainData(voc, pair_batch):
+def batch2TrainData(voc: Voc, pair_batch: List[List[str]]) -> Tuple[LongTensor, Tensor, LongTensor, BoolTensor, int]:
+    """
+    :param voc: Fully populated and pre-processed Voc object.
+    :param pair_batch: A batch of query-reply pairs. Default batch_size in train.py is 64.
+    :return: Input batch for embedding, length of each sentence in the batch, target batch, binary masking matrix,
+    the length of the longest sentence in the batch.
+    """
+    # Sort batch of pairs in reverse according to length of the query sentences
+    print("pair_batch:", pair_batch)
     pair_batch.sort(key=lambda x: len(x[0].split(" ")), reverse=True)
+
     input_batch, output_batch = [], []
     for pair in pair_batch:
         input_batch.append(pair[0])
         output_batch.append(pair[1])
+
     inp, lengths = inputVar(input_batch, voc)
     output, mask, max_target_len = outputVar(output_batch, voc)
+
     return inp, lengths, output, mask, max_target_len
 
 
 # Load/Assemble voc and pairs
 save_dir = os.path.join("data", "save")
-voc, pairs = loadPrepareData(corpus, corpus_name, datafile, save_dir)
+voc, pairs = loadPrepareData(corpus_name, datafile)
 # Print some pairs to validate
 print("\npairs:")
 for pair in pairs[:10]:

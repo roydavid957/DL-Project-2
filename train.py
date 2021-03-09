@@ -32,7 +32,7 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
     target_variable = target_variable.to(device)
     mask = mask.to(device)
     # Lengths for rnn packing should always be on the cpu
-    lengths = lengths.to("cpu")
+    lengths = lengths.to("cpu")  # length of each sentence in the batch
 
     # Initialize variables
     loss = 0
@@ -267,7 +267,9 @@ if __name__ == "__main__":
             if isinstance(v, torch.Tensor):
                 state[k] = v.cuda()
 
+    # --------------------------
     # Run training iterations
+    # --------------------------
     print("Starting Training!")
     trainIters(model_name, voc, pairs, encoder, decoder, encoder_optimizer, decoder_optimizer,
                embedding, encoder_n_layers, decoder_n_layers, save_dir, n_iteration, batch_size,

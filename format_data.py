@@ -2,7 +2,7 @@ import os
 import re
 import codecs
 import csv
-from typing import List, Dict
+from typing import List, Dict, AnyStr
 import itertools
 import pprint
 
@@ -59,7 +59,7 @@ def loadConversations(fileName: str, lines: Dict[str, Dict[str, str]], fields: L
     return conversations
 
 
-def extractSentencePairs(conversations: List[dict]) -> List[list]:
+def extractSentencePairs(conversations: List[dict]) -> List[List[str]]:
     """
     Extracts pairs of sentences from conversations
     :param conversations: A list of the pre-processed rows from movie_conversations.txt.
@@ -73,6 +73,10 @@ def extractSentencePairs(conversations: List[dict]) -> List[list]:
             # Filter wrong samples (if one of the lists is empty)
             if inputLine and targetLine:
                 qa_pairs.append([inputLine, targetLine])
+    print("", "-" * 20, sep="\n")
+    print("Example Query & Reply sentence pairs:")
+    print("-" * 20)
+    print(qa_pairs[0], qa_pairs[1])
     return qa_pairs
 
 
@@ -89,7 +93,6 @@ corpus = os.path.join("data", corpus_name)
 datafile = os.path.join(corpus, "formatted_movie_lines.txt")
 
 if __name__ == '__main__':
-    delimiter = '\t'
 
     MOVIE_LINES_FIELDS = ["lineID", "characterID", "movieID", "character", "text"]
     MOVIE_CONVERSATIONS_FIELDS = ["character1ID", "character2ID", "movieID", "utteranceIDs"]
@@ -101,8 +104,9 @@ if __name__ == '__main__':
     conversations = loadConversations(os.path.join(corpus, "movie_conversations.txt"),
                                       lines, MOVIE_CONVERSATIONS_FIELDS)
 
-    # Write new csv file
+    # Write new file, "formatted_movie_lines.txt"
     print("\nWriting newly formatted file...")
+    delimiter = '\t'  # Signals the end of query and the start of response in the pair
     with open(datafile, 'w', encoding='utf-8') as outputfile:
         writer = csv.writer(outputfile, delimiter=delimiter, lineterminator='\n')
         for pair in extractSentencePairs(conversations):
