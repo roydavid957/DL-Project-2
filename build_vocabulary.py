@@ -280,7 +280,6 @@ def batch2TrainData(voc: Voc, pair_batch: List[List[str]]) -> Tuple[LongTensor, 
     the length of the longest sentence in the batch.
     """
     # Sort batch of pairs in reverse according to length of the query sentences
-    print("pair_batch:", pair_batch)
     pair_batch.sort(key=lambda x: len(x[0].split(" ")), reverse=True)
 
     input_batch, output_batch = [], []

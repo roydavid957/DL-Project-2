@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import os
+import sys
 import random
 from build_vocabulary import voc, pairs, save_dir, normalizeString, \
     indexesFromSentence, batch2TrainData, SOS_token, MAX_LENGTH
@@ -16,7 +17,7 @@ device = torch.device("cuda" if USE_CUDA else "cpu")
 def maskNLLLoss(inp, target, mask):
     nTotal = mask.sum()
     crossEntropy = -torch.log(torch.gather(inp, 1, target.view(-1, 1)).squeeze(1))
-    loss = crossEntropy.masked_select(mask).mean()
+    loss = crossEntropy.masked_select(mask).mean()  # mean loss of the batch
     loss = loss.to(device)
     return loss, nTotal.item()
 
@@ -40,14 +41,23 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
     n_totals = 0
 
     # Forward pass through encoder
+    # TODO: Find out why encoder_hidden worked with LSTM even though it was a tuple of tensors instead of just one tensor
     encoder_outputs, encoder_hidden = encoder(input_variable, lengths)
+    print("encoder rnn:", encoder.rnn._get_name())
+    # print("encoder_hidden:", encoder_hidden)
+    print("encoder_hidden size:", encoder_hidden[0].size())
 
     # Create initial decoder input (start with SOS tokens for each sentence)
     decoder_input = torch.LongTensor([[SOS_token for _ in range(batch_size)]])
     decoder_input = decoder_input.to(device)
 
     # Set initial decoder hidden state to the encoder's final hidden state
-    decoder_hidden = encoder_hidden[:decoder.n_layers]
+    if encoder.rnn._get_name() == "GRU" and decoder.rnn._get_name() == "GRU":
+        decoder_hidden = encoder_hidden[:decoder.n_layers]
+    elif encoder.rnn._get_name() == "LSTM" and decoder.rnn._get_name() == "LSTM":
+        decoder_hidden = (encoder_hidden[0][:decoder.n_layers], encoder_hidden[1][:decoder.n_layers])
+    else:
+        raise ValueError("Encoder and Decoder types have to be the same.")
 
     # Determine if we are using teacher forcing this iteration
     use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
@@ -193,7 +203,7 @@ if __name__ == "__main__":
     # attn_model = 'concat'
 
     # Hyperparameters
-    hidden_size = 500
+    hidden_size = 500  # Number of dimensions of the embedding, number of features in a hidden state
     encoder_n_layers = 2
     decoder_n_layers = 2
     dropout = 0.1
@@ -225,8 +235,9 @@ if __name__ == "__main__":
     if loadFilename:
         embedding.load_state_dict(embedding_sd)
     # Initialize encoder & decoder models
-    encoder = EncoderRNN(hidden_size, embedding, encoder_n_layers, dropout)
-    decoder = LuongAttnDecoderRNN(attn_model, embedding, hidden_size, voc.num_words, decoder_n_layers, dropout)
+    encoder = EncoderRNN(hidden_size, embedding, encoder_n_layers, dropout, gate="LSTM")
+    decoder = LuongAttnDecoderRNN(attn_model, embedding, hidden_size,
+                                  voc.num_words, decoder_n_layers, dropout, gate="LSTM")
     if loadFilename:
         encoder.load_state_dict(encoder_sd)
         decoder.load_state_dict(decoder_sd)
