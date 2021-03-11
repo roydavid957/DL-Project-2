@@ -40,13 +40,19 @@ class EncoderRNN(nn.Module):
             hidden = (hidden, cell_state)
         # Unpack padding
         outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs)
+
         # Sum bidirectional GRU outputs
         outputs = outputs[:, :, :self.hidden_size] + outputs[:, :, self.hidden_size:]
-        # Return output and final hidden state
 
-        print(f"Encoder RNN type:{self.rnn._get_name()}, bidirectional:{self.rnn.bidirectional}")
-        print("Encoder Output shape:", outputs.size())
-        print("Encoder Hidden size:", hidden.size())
+        # print(f"Encoder RNN type:{self.rnn._get_name()}, bidirectional:{self.rnn.bidirectional}")
+        # print("Encoder Output shape:", outputs.size())
+        # try:
+        #     print("Encoder Hidden size:", hidden.size())
+        # except AttributeError:
+        #     print("Encoder Hidden[0] size:", hidden[0].size())
+        #     print("Encoder Hidden[1] size:", hidden[1].size())
+
+        # Return output and final hidden state
         return outputs, hidden
 
 
@@ -150,11 +156,16 @@ class LuongAttnDecoderRNN(nn.Module):
         output = self.out(concat_output)
         output = F.softmax(output, dim=1)
 
-        # Return output and final hidden state
-        print(f"Decoder RNN type:{self.rnn._get_name()}, bidirectional:{self.rnn.bidirectional}")
-        print("Decoder Input_step:", input_step.size())
-        print("Decoder Input shape:", encoder_outputs.size())
-        print("Decoder Hidden size:", last_hidden.size())
+        # # Return output and final hidden state
+        # print(f"Decoder RNN type:{self.rnn._get_name()}, bidirectional:{self.rnn.bidirectional}")
+        # print("Decoder Input_step:", input_step.size())
+        # print("Decoder Input shape:", encoder_outputs.size())
+        # try:
+        #     print("Decoder Hidden size:", last_hidden.size())
+        # except AttributeError:
+        #     print("Decoder Hidden[0] size:", last_hidden[0].size())
+        #     print("Decoder Hidden[1] size:", last_hidden[1].size())
+
         return output, hidden
 
 

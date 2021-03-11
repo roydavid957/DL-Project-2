@@ -49,7 +49,6 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
     n_totals = 0
 
     # Forward pass through encoder
-    # TODO: Fix this
     encoder_outputs, encoder_hidden = encoder(input_variable, lengths)
 
     # Create initial decoder input (start with SOS tokens for each sentence)
@@ -58,12 +57,12 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
 
     # Set initial decoder hidden state to the encoder's final hidden state
     if decoder.rnn._get_name() == "LSTM":
-        if not decoder.rnn.bidirectional:
+        if not decoder.rnn.bidirectional:  # unidirectional LSTM decoder
             decoder_hidden = [encoder_state[:decoder_n_layers] for encoder_state in encoder_hidden]  #
     else:
-        if not decoder.rnn.bidirectional:  # unidirectional GRU
+        if not decoder.rnn.bidirectional:  # unidirectional GRU decoder
             decoder_hidden = encoder_hidden[:decoder.n_layers]
-    if decoder.rnn.bidirectional:
+    if decoder.rnn.bidirectional:  # this shall not be used yet
         decoder_hidden = encoder_hidden
 
     # Determine if we are using teacher forcing this iteration
@@ -241,9 +240,9 @@ if __name__ == "__main__":
     if loadFilename:
         embedding.load_state_dict(embedding_sd)
     # Initialize encoder & decoder models
-    encoder = EncoderRNN(hidden_size, embedding, encoder_n_layers, dropout, gate="GRU", bidirectional=True)
+    encoder = EncoderRNN(hidden_size, embedding, encoder_n_layers, dropout, gate="LSTM", bidirectional=True)
     decoder = LuongAttnDecoderRNN(attn_model, embedding, hidden_size,
-                                  voc.num_words, decoder_n_layers, dropout, gate="GRU", bidirectional=False)
+                                  voc.num_words, decoder_n_layers, dropout, gate="LSTM", bidirectional=False)
     if loadFilename:
         encoder.load_state_dict(encoder_sd)
         decoder.load_state_dict(decoder_sd)

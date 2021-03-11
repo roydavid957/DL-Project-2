@@ -67,7 +67,7 @@ def extractSentencePairs(conversations: List[dict]) -> List[List[str]]:
     """
     qa_pairs = []
     for conversation in conversations:
-        for i in range(0, len(conversation["lines"]) - 1, 2):  # We ignore the last line (no answer for it)
+        for i in range(0, len(conversation["lines"]) - 1):  # We ignore the last line (no answer for it)
             inputLine = conversation["lines"][i]["text"].strip()  # Query
             targetLine = conversation["lines"][i + 1]["text"].strip()  # Reply
             # Filter wrong samples (if one of the lists is empty)
