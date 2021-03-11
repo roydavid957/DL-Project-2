@@ -15,6 +15,14 @@ device = torch.device("cuda" if USE_CUDA else "cpu")
 
 
 def maskNLLLoss(inp, target, mask):
+    """
+    The function calculates the average negative log likelihood of the elements
+     that correspond to a 1 in the mask tensor.
+    :param inp:
+    :param target:
+    :param mask:
+    :return:
+    """
     nTotal = mask.sum()
     crossEntropy = -torch.log(torch.gather(inp, 1, target.view(-1, 1)).squeeze(1))
     loss = crossEntropy.masked_select(mask).mean()  # mean loss of the batch
@@ -41,23 +49,22 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
     n_totals = 0
 
     # Forward pass through encoder
-    # TODO: Find out why encoder_hidden worked with LSTM even though it was a tuple of tensors instead of just one tensor
+    # TODO: Fix this
     encoder_outputs, encoder_hidden = encoder(input_variable, lengths)
-    print("encoder rnn:", encoder.rnn._get_name())
-    # print("encoder_hidden:", encoder_hidden)
-    print("encoder_hidden size:", encoder_hidden[0].size())
 
     # Create initial decoder input (start with SOS tokens for each sentence)
     decoder_input = torch.LongTensor([[SOS_token for _ in range(batch_size)]])
     decoder_input = decoder_input.to(device)
 
     # Set initial decoder hidden state to the encoder's final hidden state
-    if encoder.rnn._get_name() == "GRU" and decoder.rnn._get_name() == "GRU":
-        decoder_hidden = encoder_hidden[:decoder.n_layers]
-    elif encoder.rnn._get_name() == "LSTM" and decoder.rnn._get_name() == "LSTM":
-        decoder_hidden = (encoder_hidden[0][:decoder.n_layers], encoder_hidden[1][:decoder.n_layers])
+    if decoder.rnn._get_name() == "LSTM":
+        if not decoder.rnn.bidirectional:
+            decoder_hidden = [encoder_state[:decoder_n_layers] for encoder_state in encoder_hidden]  #
     else:
-        raise ValueError("Encoder and Decoder types have to be the same.")
+        if not decoder.rnn.bidirectional:  # unidirectional GRU
+            decoder_hidden = encoder_hidden[:decoder.n_layers]
+    if decoder.rnn.bidirectional:
+        decoder_hidden = encoder_hidden
 
     # Determine if we are using teacher forcing this iteration
     use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
@@ -175,7 +182,6 @@ def evaluate(searcher, voc, sentence, max_length=MAX_LENGTH):
 
 
 def evaluateInput(searcher, voc):
-    input_sentence = ''
     while True:
         try:
             # Get input sentence
@@ -235,9 +241,9 @@ if __name__ == "__main__":
     if loadFilename:
         embedding.load_state_dict(embedding_sd)
     # Initialize encoder & decoder models
-    encoder = EncoderRNN(hidden_size, embedding, encoder_n_layers, dropout, gate="LSTM")
+    encoder = EncoderRNN(hidden_size, embedding, encoder_n_layers, dropout, gate="GRU", bidirectional=True)
     decoder = LuongAttnDecoderRNN(attn_model, embedding, hidden_size,
-                                  voc.num_words, decoder_n_layers, dropout, gate="LSTM")
+                                  voc.num_words, decoder_n_layers, dropout, gate="GRU", bidirectional=False)
     if loadFilename:
         encoder.load_state_dict(encoder_sd)
         decoder.load_state_dict(decoder_sd)

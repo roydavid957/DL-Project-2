@@ -9,7 +9,7 @@ device = torch.device("cuda" if USE_CUDA else "cpu")
 
 
 class EncoderRNN(nn.Module):
-    def __init__(self, hidden_size, embedding, n_layers=1, dropout=0, gate=None):
+    def __init__(self, hidden_size, embedding, n_layers=1, dropout=0, gate=None, bidirectional=False):
         super(EncoderRNN, self).__init__()
         self.n_layers = n_layers
         self.hidden_size = hidden_size
@@ -19,10 +19,10 @@ class EncoderRNN(nn.Module):
         #   because our input size is a word embedding with number of features == hidden_size
         if gate == "GRU":
             self.rnn = nn.GRU(hidden_size, hidden_size, n_layers,
-                              dropout=(0 if n_layers == 1 else dropout), bidirectional=True)
+                              dropout=(0 if n_layers == 1 else dropout), bidirectional=bidirectional)
         elif gate == "LSTM":
             self.rnn = nn.LSTM(hidden_size, hidden_size, n_layers,
-                              dropout=(0 if n_layers == 1 else dropout), bidirectional=True)
+                               dropout=(0 if n_layers == 1 else dropout), bidirectional=bidirectional)
         else:
             raise ValueError("The gated RNN's type has not been given."
                              "Possible options are: 'GRU', 'LSTM'.")
@@ -37,16 +37,18 @@ class EncoderRNN(nn.Module):
             outputs, hidden = self.rnn(packed, hidden)
         elif self.rnn._get_name() == "LSTM":
             outputs, (hidden, cell_state) = self.rnn(packed, hidden)
+            hidden = (hidden, cell_state)
         # Unpack padding
         outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs)
         # Sum bidirectional GRU outputs
         outputs = outputs[:, :, :self.hidden_size] + outputs[:, :, self.hidden_size:]
         # Return output and final hidden state
 
-        if self.rnn._get_name() == "GRU":
-            return outputs, hidden
-        elif self.rnn._get_name() == "LSTM":
-            return outputs, (hidden, cell_state)
+        print(f"Encoder RNN type:{self.rnn._get_name()}, bidirectional:{self.rnn.bidirectional}")
+        print("Encoder Output shape:", outputs.size())
+        print("Encoder Hidden size:", hidden.size())
+        return outputs, hidden
+
 
 # Luong attention layer
 class Attn(nn.Module):
@@ -90,7 +92,8 @@ class Attn(nn.Module):
 
 
 class LuongAttnDecoderRNN(nn.Module):
-    def __init__(self, attn_model, embedding, hidden_size, output_size, n_layers=1, dropout=0.1, gate=None):
+    def __init__(self, attn_model, embedding, hidden_size, output_size,
+                 n_layers=1, dropout=0.1, gate=None, bidirectional=False):
         super(LuongAttnDecoderRNN, self).__init__()
 
         # Keep for reference
@@ -99,34 +102,41 @@ class LuongAttnDecoderRNN(nn.Module):
         self.output_size = output_size
         self.n_layers = n_layers
         self.dropout = dropout
+        self.gate = gate
 
         # Define layers
         self.embedding = embedding
         self.embedding_dropout = nn.Dropout(dropout)
+
         # TODO: Figure out why this cannot be if-else'd
-        self.rnn = nn.LSTM(hidden_size, hidden_size, n_layers, dropout=(0 if n_layers == 1 else dropout))
-        # if gate == "GRU":
-        #     self.rnn = nn.GRU(hidden_size, hidden_size, n_layers,
-        #                       dropout=(0 if n_layers == 1 else dropout), bidirectional=True)
-        # elif gate == "LSTM":
-        #     self.rnn = nn.LSTM(hidden_size, hidden_size, n_layers,
-        #                       dropout=(0 if n_layers == 1 else dropout), bidirectional=True)
-        # else:
-        #     raise ValueError("The gated RNN's type has not been given."
-        #                      "Possible options are: 'GRU', 'LSTM'.")
+        if self.gate == "GRU":
+            self.rnn = nn.GRU(hidden_size, hidden_size, n_layers,
+                              dropout=(0 if n_layers == 1 else dropout), bidirectional=bidirectional)
+        elif self.gate == "LSTM":
+            self.rnn = nn.LSTM(hidden_size, hidden_size, n_layers,
+                               dropout=(0 if n_layers == 1 else dropout), bidirectional=bidirectional)
+        else:
+            raise ValueError("The gated RNN's type has not been given."
+                             "Possible options are: 'GRU', 'LSTM'.")
+
         self.concat = nn.Linear(hidden_size * 2, hidden_size)
         self.out = nn.Linear(hidden_size, output_size)
 
-        self.attn = Attn(attn_model, hidden_size)
+        self.attn = Attn(attn_model, hidden_size + bidirectional * hidden_size)
 
     def forward(self, input_step, last_hidden, encoder_outputs):
         # Note: we run this one step (word) at a time
         # Get embedding of current input word
         embedded = self.embedding(input_step)
         embedded = self.embedding_dropout(embedded)
+
         # Forward through bidirectional GRU
-        #TODO: Figure out why this cannot be if-else'd
-        rnn_output, hidden = self.rnn(embedded, last_hidden)
+        # rnn_output, hidden = self.rnn(embedded, last_hidden)
+        if self.gate == "GRU":
+            rnn_output, hidden = self.rnn(embedded, last_hidden)
+        elif self.gate == "LSTM":
+            rnn_output, (hidden, cell_state) = self.rnn(embedded, last_hidden)
+            hidden = (hidden, cell_state)
         # Calculate attention weights from the current GRU output
         attn_weights = self.attn(rnn_output, encoder_outputs)
         # Multiply attention weights to encoder outputs to get new "weighted sum" context vector
@@ -139,7 +149,12 @@ class LuongAttnDecoderRNN(nn.Module):
         # Predict next word using Luong eq. 6
         output = self.out(concat_output)
         output = F.softmax(output, dim=1)
+
         # Return output and final hidden state
+        print(f"Decoder RNN type:{self.rnn._get_name()}, bidirectional:{self.rnn.bidirectional}")
+        print("Decoder Input_step:", input_step.size())
+        print("Decoder Input shape:", encoder_outputs.size())
+        print("Decoder Hidden size:", last_hidden.size())
         return output, hidden
 
 
