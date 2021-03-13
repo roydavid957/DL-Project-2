@@ -1,6 +1,6 @@
 import torch
 from torch import LongTensor, Tensor, BoolTensor
-
+import sys
 import os
 import itertools
 import re
@@ -294,7 +294,6 @@ def batch2TrainData(voc: Voc, pair_batch: List[List[str]]) -> Tuple[LongTensor, 
 
 
 # Load/Assemble voc and pairs
-save_dir = os.path.join("data", "save")
 voc, pairs = loadPrepareData(corpus_name, datafile)
 # Print some pairs to validate
 print("\npairs:")

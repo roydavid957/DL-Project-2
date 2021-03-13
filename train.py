@@ -1,17 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import os
-import sys
 import random
-from build_vocabulary import voc, pairs, save_dir, normalizeString, \
-    indexesFromSentence, batch2TrainData, SOS_token, MAX_LENGTH
-from format_data import corpus_name
-from model import EncoderRNN, LuongAttnDecoderRNN, GreedySearchDecoder
-
-
-USE_CUDA = torch.cuda.is_available()
-device = torch.device("cuda" if USE_CUDA else "cpu")
+from build_vocabulary import voc, pairs, batch2TrainData, SOS_token, MAX_LENGTH
+from model import EncoderRNN, LuongAttnDecoderRNN
 
 
 def maskNLLLoss(inp, target, mask):
@@ -110,9 +102,9 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
     return sum(print_losses) / n_totals
 
 
-def trainIters(model_name, voc, pairs, encoder, decoder, encoder_optimizer, decoder_optimizer, embedding,
-               encoder_n_layers, decoder_n_layers, save_dir, n_iteration, batch_size, print_every, save_every, clip,
-               corpus_name, loadFilename):
+def trainIters(voc, pairs, encoder, decoder, encoder_optimizer, decoder_optimizer, embedding,
+               n_iteration, batch_size, print_every, clip):
+
     # Load batches for each iteration
     training_batches = [batch2TrainData(voc, [random.choice(pairs) for _ in range(batch_size)])
                         for _ in range(n_iteration)]
@@ -121,8 +113,6 @@ def trainIters(model_name, voc, pairs, encoder, decoder, encoder_optimizer, deco
     print('Initializing ...')
     start_iteration = 1
     print_loss = 0
-    if loadFilename:
-        start_iteration = checkpoint['iteration'] + 1
 
     # Training loop
     print("Training...")
@@ -144,63 +134,11 @@ def trainIters(model_name, voc, pairs, encoder, decoder, encoder_optimizer, deco
                                                                                           print_loss_avg))
             print_loss = 0
 
-        # Save checkpoint
-        if (iteration % save_every == 0):
-            directory = os.path.join(save_dir, model_name, corpus_name,
-                                     '{}-{}_{}'.format(encoder_n_layers, decoder_n_layers, hidden_size))
-            if not os.path.exists(directory):
-                os.makedirs(directory)
-            torch.save({
-                'iteration': iteration,
-                'en': encoder.state_dict(),
-                'de': decoder.state_dict(),
-                'en_opt': encoder_optimizer.state_dict(),
-                'de_opt': decoder_optimizer.state_dict(),
-                'loss': loss,
-                'voc_dict': voc.__dict__,
-                'embedding': embedding.state_dict()
-            }, os.path.join(directory, '{}_{}.tar'.format(iteration, 'checkpoint')))
-
-
-def evaluate(searcher, voc, sentence, max_length=MAX_LENGTH):
-    ### Format input sentence as a batch
-    # words -> indexes
-    indexes_batch = [indexesFromSentence(voc, sentence)]
-    # Create lengths tensor
-    lengths = torch.tensor([len(indexes) for indexes in indexes_batch])
-    # Transpose dimensions of batch to match models' expectations
-    input_batch = torch.LongTensor(indexes_batch).transpose(0, 1)
-    # Use appropriate device
-    input_batch = input_batch.to(device)
-    lengths = lengths.to("cpu")
-    # Decode sentence with searcher
-    tokens, scores = searcher(input_batch, lengths, max_length)
-    # indexes -> words
-    decoded_words = [voc.index2word[token.item()] for token in tokens]
-    return decoded_words
-
-
-def evaluateInput(searcher, voc):
-    while True:
-        try:
-            # Get input sentence
-            input_sentence = input('> ')
-            # Check if it is quit case
-            if input_sentence == 'q' or input_sentence == 'quit':
-                break
-            # Normalize sentence
-            input_sentence = normalizeString(input_sentence)
-            # Evaluate sentence
-            output_words = evaluate(searcher, voc, input_sentence)
-            # Format and print response sentence
-            output_words[:] = [x for x in output_words if not (x == 'EOS' or x == 'PAD')]
-            print('Bot:', ' '.join(output_words))
-
-        except KeyError:
-            print("Error: Encountered unknown word.")
-
 
 if __name__ == "__main__":
+    USE_CUDA = torch.cuda.is_available()
+    device = torch.device("cuda" if USE_CUDA else "cpu")
+
     # Configure models
     model_name = 'cb_model'
     attn_model = 'dot'
@@ -213,39 +151,17 @@ if __name__ == "__main__":
     decoder_n_layers = 2
     dropout = 0.1
     batch_size = 64
-
-    # Set checkpoint to load from; set to None if starting from scratch
-    loadFilename = None
     checkpoint_iter = 4000
-    # loadFilename = os.path.join(save_dir, model_name, corpus_name,
-    #                            '{}-{}_{}'.format(encoder_n_layers, decoder_n_layers, hidden_size),
-    #                            '{}_checkpoint.tar'.format(checkpoint_iter))
-
-    # Load model if a loadFilename is provided
-    if loadFilename:
-        # If loading on same machine the model was trained on
-        checkpoint = torch.load(loadFilename)
-        # If loading a model trained on GPU to CPU
-        # checkpoint = torch.load(loadFilename, map_location=torch.device('cpu'))
-        encoder_sd = checkpoint['en']
-        decoder_sd = checkpoint['de']
-        encoder_optimizer_sd = checkpoint['en_opt']
-        decoder_optimizer_sd = checkpoint['de_opt']
-        embedding_sd = checkpoint['embedding']
-        voc.__dict__ = checkpoint['voc_dict']
 
     print('Building encoder and decoder ...')
     # Initialize word embeddings
     embedding = nn.Embedding(voc.num_words, hidden_size)
-    if loadFilename:
-        embedding.load_state_dict(embedding_sd)
+
     # Initialize encoder & decoder models
-    encoder = EncoderRNN(hidden_size, embedding, encoder_n_layers, dropout, gate="LSTM", bidirectional=True)
+    encoder = EncoderRNN(hidden_size, embedding, encoder_n_layers, dropout, gate="MogLSTM", bidirectional=True)
     decoder = LuongAttnDecoderRNN(attn_model, embedding, hidden_size,
                                   voc.num_words, decoder_n_layers, dropout, gate="LSTM", bidirectional=False)
-    if loadFilename:
-        encoder.load_state_dict(encoder_sd)
-        decoder.load_state_dict(decoder_sd)
+
     # Use appropriate device
     encoder = encoder.to(device)
     decoder = decoder.to(device)
@@ -268,9 +184,6 @@ if __name__ == "__main__":
     print('Building optimizers ...')
     encoder_optimizer = optim.Adam(encoder.parameters(), lr=learning_rate)
     decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate * decoder_learning_ratio)
-    if loadFilename:
-        encoder_optimizer.load_state_dict(encoder_optimizer_sd)
-        decoder_optimizer.load_state_dict(decoder_optimizer_sd)
 
     # If you have cuda, configure cuda to call
     for state in encoder_optimizer.state.values():
@@ -288,15 +201,4 @@ if __name__ == "__main__":
     # --------------------------
     print("Starting Training!")
     trainIters(model_name, voc, pairs, encoder, decoder, encoder_optimizer, decoder_optimizer,
-               embedding, encoder_n_layers, decoder_n_layers, save_dir, n_iteration, batch_size,
-               print_every, save_every, clip, corpus_name, loadFilename)
-
-    # Set dropout layers to eval mode
-    encoder.eval()
-    decoder.eval()
-
-    # Initialize search module
-    searcher = GreedySearchDecoder(encoder, decoder)
-
-    # Begin chatting (uncomment and run the following line to begin)
-    # evaluateInput(encoder, decoder, searcher, voc)
+               n_iteration, batch_size, print_every, clip)

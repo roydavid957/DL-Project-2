@@ -1,47 +1,122 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from typing import Tuple, List, Dict
 from build_vocabulary import SOS_token
 
 USE_CUDA = torch.cuda.is_available()
 device = torch.device("cuda" if USE_CUDA else "cpu")
 
 
+class MogLSTM(nn.Module):
+    def __init__(self, input_size, hidden_size, vocab_size, dropout=0, bidirectional=False, mogrify_steps=5):
+        super().__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.mogrifier_lstm_layer1 = MogLSTMCell(input_size, hidden_size, mogrify_steps)
+        self.mogrifier_lstm_layer2 = MogLSTMCell(hidden_size, hidden_size, mogrify_steps)
+        self.fc = nn.Linear(hidden_size, vocab_size)
+        self.drop = nn.Dropout(dropout)
+
+    def forward(self, input_seq, hidden=None):
+        """
+        :param input_seq: Default expected Input tensor of shape (seq_len, batch, input_size)
+        :param hidden: Hidden state and cell state. Not provided for encoder, only for decoder.
+        """
+        batch_size = input_seq.shape[1]
+        seq_len = input_seq[0]
+        h1, c1 = [torch.zeros(batch_size, self.hidden_size), torch.zeros(batch_size, self.hidden_size)]
+        h2, c2 = [torch.zeros(batch_size, self.hidden_size), torch.zeros(batch_size, self.hidden_size)]
+        hidden_states = []
+        outputs = []
+        for step in range(seq_len):
+            x = self.drop(input_seq[step, :, :])
+            h1, c1 = self.mogrifier_lstm_layer1(x, (h1, c1))  # dropout in default LSTM PyTorch doc. is true
+            h2, c2 = self.mogrifier_lstm_layer2(h1, (h2, c2))
+            out = self.fc(self.drop(h2))
+            hidden_states.append(h2.unsqueeze(1))
+            outputs.append(out.unsqueeze(1))
+
+        hidden_states = torch.cat(hidden_states, dim=0)  # (seq_len, batch, input_size)
+        outputs = torch.cat(outputs, dim=0)  # (seq_len, batch, input_size)
+
+        return outputs, hidden_states
+
+
+class MogLSTMCell(nn.Module):
+
+    def __init__(self, input_size, hidden_size, mogrify_steps=5):
+        super(MogLSTMCell, self).__init__()
+        self.mogrify_steps = mogrify_steps
+        self.lstm = nn.LSTMCell(input_size, hidden_size)
+        self.mogrifier_list = nn.ModuleList([nn.Linear(hidden_size, input_size)])  # start with q
+        for i in range(1, mogrify_steps):
+            if i % 2 == 0:
+                self.mogrifier_list.extend([nn.Linear(hidden_size, input_size)])  # q --> update x
+            else:
+                self.mogrifier_list.extend([nn.Linear(input_size, hidden_size)])  # r --> update h
+
+    def mogrify(self, x, h):
+        for i in range(self.mogrify_steps):
+            if (i + 1) % 2 == 0:
+                h = (2 * torch.sigmoid(self.mogrifier_list[i](x))) * h
+            else:
+                x = (2 * torch.sigmoid(self.mogrifier_list[i](h))) * x
+        return x, h
+
+    def forward(self, x, states: Tuple):
+        ht, ct = states
+        x, ht = self.mogrify(x, ht)
+        ht, ct = self.lstm(x, (ht, ct))
+        return ht, ct
+
+
 class EncoderRNN(nn.Module):
-    def __init__(self, hidden_size, embedding, n_layers=1, dropout=0, gate=None, bidirectional=False):
+    def __init__(self, hidden_size, embedding, n_layers=1, dropout=0, gate=None, bidirectional=False, vocab_size=0):
         super(EncoderRNN, self).__init__()
         self.n_layers = n_layers
         self.hidden_size = hidden_size
         self.embedding = embedding
 
-        # Initialize GRU/LSTM; the input_size and hidden_size params are both set to 'hidden_size'
+        # - Initialize GRU/LSTM; the input_size and hidden_size params are both set to 'hidden_size'
         #   because our input size is a word embedding with number of features == hidden_size
+        # - dropout is set to 0 only in case of 1 hidden layer (according to PyTorch docs at least 2 are needed)
         if gate == "GRU":
             self.rnn = nn.GRU(hidden_size, hidden_size, n_layers,
                               dropout=(0 if n_layers == 1 else dropout), bidirectional=bidirectional)
         elif gate == "LSTM":
             self.rnn = nn.LSTM(hidden_size, hidden_size, n_layers,
                                dropout=(0 if n_layers == 1 else dropout), bidirectional=bidirectional)
+        elif gate == "MogLSTM":
+            self.rnn = MogLSTM(hidden_size, hidden_size, vocab_size, dropout=dropout)
         else:
             raise ValueError("The gated RNN's type has not been given."
-                             "Possible options are: 'GRU', 'LSTM'.")
+                             "Possible options are: 'GRU', 'LSTM', 'MogLSTM'.")
 
     def forward(self, input_seq, input_lengths, hidden=None):
+        """
+        :param input_seq: Padded input sequence of shape (10,64) - before embedding
+        :param input_lengths: A 1D tensor containing the length of each sentence within the batch in decreasing order.
+                              E.g. [10,10,10,9,9,8...,3]
+        """
         # Convert word indexes to embeddings
-        embedded = self.embedding(input_seq)
+        embedded = self.embedding(input_seq)  # input shape: (10, 64), output shape: (10, 64, 500)
+        print("Input_lengths:", input_lengths)
+        print("Input_lengths size:", input_lengths.size())
         # Pack padded batch of sequences for RNN module
         packed = nn.utils.rnn.pack_padded_sequence(embedded, input_lengths)
+        print("PACKED:", packed)
+
         # Forward pass through the network
-        if self.rnn._get_name() == "GRU":
-            outputs, hidden = self.rnn(packed, hidden)
-        elif self.rnn._get_name() == "LSTM":
+        if self.rnn._get_name() in ["LSTM", "MogLSTM"]:
             outputs, (hidden, cell_state) = self.rnn(packed, hidden)
             hidden = (hidden, cell_state)
+        else:
+            outputs, hidden = self.rnn(packed, hidden)
+
         # Unpack padding
         outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs)
-
-        # Sum bidirectional GRU outputs
+        # Sum bidirectional outputs
         outputs = outputs[:, :, :self.hidden_size] + outputs[:, :, self.hidden_size:]
 
         # print(f"Encoder RNN type:{self.rnn._get_name()}, bidirectional:{self.rnn.bidirectional}")
@@ -114,7 +189,6 @@ class LuongAttnDecoderRNN(nn.Module):
         self.embedding = embedding
         self.embedding_dropout = nn.Dropout(dropout)
 
-        # TODO: Figure out why this cannot be if-else'd
         if self.gate == "GRU":
             self.rnn = nn.GRU(hidden_size, hidden_size, n_layers,
                               dropout=(0 if n_layers == 1 else dropout), bidirectional=bidirectional)
@@ -167,34 +241,3 @@ class LuongAttnDecoderRNN(nn.Module):
         #     print("Decoder Hidden[1] size:", last_hidden[1].size())
 
         return output, hidden
-
-
-class GreedySearchDecoder(nn.Module):
-    def __init__(self, encoder, decoder):
-        super(GreedySearchDecoder, self).__init__()
-        self.encoder = encoder
-        self.decoder = decoder
-
-    def forward(self, input_seq, input_length, max_length):
-        # Forward input through encoder model
-        encoder_outputs, encoder_hidden = self.encoder(input_seq, input_length)
-        # Prepare encoder's final hidden layer to be first hidden input to the decoder
-        decoder_hidden = encoder_hidden[:self.decoder.n_layers]
-        # Initialize decoder input with SOS_token
-        decoder_input = torch.ones(1, 1, device=device, dtype=torch.long) * SOS_token
-        # Initialize tensors to append decoded words to
-        all_tokens = torch.zeros([0], device=device, dtype=torch.long)
-        all_scores = torch.zeros([0], device=device)
-        # Iteratively decode one word token at a time
-        for _ in range(max_length):
-            # Forward pass through decoder
-            decoder_output, decoder_hidden = self.decoder(decoder_input, decoder_hidden, encoder_outputs)
-            # Obtain most likely word token and its softmax score
-            decoder_scores, decoder_input = torch.max(decoder_output, dim=1)
-            # Record token and score
-            all_tokens = torch.cat((all_tokens, decoder_input), dim=0)
-            all_scores = torch.cat((all_scores, decoder_scores), dim=0)
-            # Prepare current token to be next decoder input (add a dimension)
-            decoder_input = torch.unsqueeze(decoder_input, 0)
-        # Return collections of word tokens and scores
-        return all_tokens, all_scores
