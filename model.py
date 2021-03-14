@@ -2,86 +2,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import PackedSequence
-
 from typing import Tuple, List, Dict
 
 USE_CUDA = torch.cuda.is_available()
 device = torch.device("cuda" if USE_CUDA else "cpu")
 
 
-class MogLSTM(nn.Module):
-    def __init__(self, input_size, hidden_size, vocab_size, dropout=0, bidirectional=False, mogrify_steps=5):
-        super().__init__()
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-        self.mogrifier_lstm_layer1 = MogLSTMCell(input_size, hidden_size, mogrify_steps)
-        self.mogrifier_lstm_layer2 = MogLSTMCell(hidden_size, hidden_size, mogrify_steps)
-        self.fc = nn.Linear(hidden_size, vocab_size)
-        self.drop = nn.Dropout(dropout)
-
-    def forward(self, input_seq: PackedSequence, hidden=None):
-        """
-        :param input_seq: A PackedSequence which is a tuple of 2 tensors, the data itself and their size.
-        Data is a single tensor from all batches in an "optimized" format, e.g. an original tensor of shape (10,3)
-        becomes shape (1,30).
-        batch_sizes (sentence lengths in each batch) tensor that helps PyTorch to keep track of required operations per
-        batch.
-        :param hidden: Hidden state and cell state. Not provided for encoder, only for decoder.
-        """
-        # NOTES:
-        # - Embedding is not required within the forward pass contrary to the original implementation, it is handled
-        # in EncoderRNN's forward pass
-        # -
-        batch_size = input_seq.shape[1]
-        seq_len = input_seq[0]
-        h1, c1 = [torch.zeros(batch_size, self.hidden_size), torch.zeros(batch_size, self.hidden_size)]
-        h2, c2 = [torch.zeros(batch_size, self.hidden_size), torch.zeros(batch_size, self.hidden_size)]
-        hidden_states = []
-        outputs = []
-        for step in range(seq_len):
-            x = self.drop(input_seq[step, :, :])
-            h1, c1 = self.mogrifier_lstm_layer1(x, (h1, c1))  # dropout in default LSTM PyTorch doc. is true
-            h2, c2 = self.mogrifier_lstm_layer2(h1, (h2, c2))
-            out = self.fc(self.drop(h2))
-            hidden_states.append(h2.unsqueeze(1))
-            outputs.append(out.unsqueeze(1))
-
-        hidden_states = torch.cat(hidden_states, dim=0)  # (seq_len, batch, input_size)
-        outputs = torch.cat(outputs, dim=0)  # (seq_len, batch, input_size)
-
-        return outputs, hidden_states
-
-
-class MogLSTMCell(nn.Module):
-
-    def __init__(self, input_size, hidden_size, mogrify_steps=5):
-        super(MogLSTMCell, self).__init__()
-        self.mogrify_steps = mogrify_steps
-        self.lstm = nn.LSTMCell(input_size, hidden_size)
-        self.mogrifier_list = nn.ModuleList([nn.Linear(hidden_size, input_size)])  # start with q
-        for i in range(1, mogrify_steps):
-            if i % 2 == 0:
-                self.mogrifier_list.extend([nn.Linear(hidden_size, input_size)])  # q --> update x
-            else:
-                self.mogrifier_list.extend([nn.Linear(input_size, hidden_size)])  # r --> update h
-
-    def mogrify(self, x, h):
-        for i in range(self.mogrify_steps):
-            if (i + 1) % 2 == 0:
-                h = (2 * torch.sigmoid(self.mogrifier_list[i](x))) * h
-            else:
-                x = (2 * torch.sigmoid(self.mogrifier_list[i](h))) * x
-        return x, h
-
-    def forward(self, x, states: Tuple):
-        ht, ct = states
-        x, ht = self.mogrify(x, ht)
-        ht, ct = self.lstm(x, (ht, ct))
-        return ht, ct
-
-
 class EncoderRNN(nn.Module):
-    def __init__(self, hidden_size, embedding, n_layers=1, dropout=0, gate=None, bidirectional=False, vocab_size=0):
+    def __init__(self, hidden_size, embedding, n_layers, dropout, gate=None, bidirectional=False):
         super(EncoderRNN, self).__init__()
         self.n_layers = n_layers
         self.hidden_size = hidden_size
@@ -96,8 +24,6 @@ class EncoderRNN(nn.Module):
         elif gate == "LSTM":
             self.rnn = nn.LSTM(hidden_size, hidden_size, n_layers,
                                dropout=(0 if n_layers == 1 else dropout), bidirectional=bidirectional)
-        elif gate == "MogLSTM":
-            self.rnn = MogLSTM(hidden_size, hidden_size, vocab_size, dropout=dropout)
         else:
             raise ValueError("The gated RNN's type has not been given."
                              "Possible options are: 'GRU', 'LSTM', 'MogLSTM'.")
@@ -106,26 +32,23 @@ class EncoderRNN(nn.Module):
         """
         :param input_seq: Padded input sequence of shape (10,64) - before embedding
         :param input_lengths: A 1D tensor containing the length of each sentence within the batch in decreasing order.
-                              E.g. [10,10,10,9,9,8...,3]
+                              E.g. [10,10,10,9,9,8...,3], thus size is (64).
         """
         # Convert word indexes to embeddings
         embedded = self.embedding(input_seq)  # input shape: (10, 64), output shape: (10, 64, 500)
-        print("Input_lengths:", input_lengths)
-        print("Input_lengths size:", input_lengths.size())
         # Pack padded batch of sequences for RNN module
         packed = nn.utils.rnn.pack_padded_sequence(embedded, input_lengths)
-        print("PACKED:", packed)
 
         # Forward pass through the network
-        if self.rnn._get_name() in ["LSTM", "MogLSTM"]:
+        if self.rnn._get_name() == "LSTM":
             outputs, (hidden, cell_state) = self.rnn(packed, hidden)
             hidden = (hidden, cell_state)
         else:
             outputs, hidden = self.rnn(packed, hidden)
 
-        # Unpack padding
+        # # Unpack padding
         outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs)
-        # Sum bidirectional outputs
+        # # Sum bidirectional outputs
         outputs = outputs[:, :, :self.hidden_size] + outputs[:, :, self.hidden_size:]
 
         # Return output and final hidden state
@@ -175,7 +98,7 @@ class Attn(nn.Module):
 
 class LuongAttnDecoderRNN(nn.Module):
     def __init__(self, attn_model, embedding, hidden_size, output_size,
-                 n_layers=1, dropout=0.1, gate=None, bidirectional=False):
+                 n_layers, dropout, gate=None, bidirectional=False):
         super(LuongAttnDecoderRNN, self).__init__()
 
         # Keep for reference
@@ -198,11 +121,10 @@ class LuongAttnDecoderRNN(nn.Module):
                                dropout=(0 if n_layers == 1 else dropout), bidirectional=bidirectional)
         else:
             raise ValueError("The gated RNN's type has not been given."
-                             "Possible options are: 'GRU', 'LSTM'.")
+                             "Possible options are: 'GRU', 'LSTM', 'MogLSTM'.")
 
         self.concat = nn.Linear(hidden_size * 2, hidden_size)
         self.out = nn.Linear(hidden_size, output_size)
-
         self.attn = Attn(attn_model, hidden_size + bidirectional * hidden_size)
 
     def forward(self, input_step, last_hidden, encoder_outputs):
@@ -211,13 +133,13 @@ class LuongAttnDecoderRNN(nn.Module):
         embedded = self.embedding(input_step)
         embedded = self.embedding_dropout(embedded)
 
-        # Forward through bidirectional GRU
-        # rnn_output, hidden = self.rnn(embedded, last_hidden)
-        if self.gate == "GRU":
-            rnn_output, hidden = self.rnn(embedded, last_hidden)
-        elif self.gate == "LSTM":
+        # Forward through unidirectional GRU/LSTM
+        if self.gate == "LSTM":
             rnn_output, (hidden, cell_state) = self.rnn(embedded, last_hidden)
             hidden = (hidden, cell_state)
+        else:
+            rnn_output, hidden = self.rnn(embedded, last_hidden)
+
         # Calculate attention weights from the current GRU output
         attn_weights = self.attn(rnn_output, encoder_outputs)
         # Multiply attention weights to encoder outputs to get new "weighted sum" context vector

@@ -32,7 +32,7 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
     input_variable = input_variable.to(device)
     target_variable = target_variable.to(device)
     mask = mask.to(device)
-    # Lengths for rnn packing should always be on the cpu
+    # !!! Lengths for rnn packing should always be on the cpu !!!
     lengths = lengths.to("cpu")  # length of each sentence in the batch
 
     # Initialize variables
@@ -43,23 +43,29 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
     # Forward pass through encoder
     encoder_outputs, encoder_hidden = encoder(input_variable, lengths)
 
+    # ------------------------------------
+    # SETTING UP DECODER
+    # ------------------------------------
     # Create initial decoder input (start with SOS tokens for each sentence)
     decoder_input = torch.LongTensor([[SOS_token for _ in range(batch_size)]])
     decoder_input = decoder_input.to(device)
-
     # Set initial decoder hidden state to the encoder's final hidden state
     if decoder.rnn._get_name() == "LSTM":
         if not decoder.rnn.bidirectional:  # unidirectional LSTM decoder
-            decoder_hidden = [encoder_state[:decoder_n_layers] for encoder_state in encoder_hidden]  #
+            decoder_hidden = [encoder_state[:decoder_n_layers] for encoder_state in encoder_hidden]
+            # decoder_hidden[0].shape = torch.Size([2, 64, 500]), decoder_hidden[1].shape = torch.Size([2, 64, 500])
     else:
-        if not decoder.rnn.bidirectional:  # unidirectional GRU decoder
+        if not decoder.rnn.bidirectional:  # unidirectional GRU
             decoder_hidden = encoder_hidden[:decoder.n_layers]
-    if decoder.rnn.bidirectional:  # this shall not be used yet
+
+    if decoder.rnn.bidirectional:  # this shall not be used yet, only unidirectional decoder works
         decoder_hidden = encoder_hidden
 
+    # ------------------------------------
+    # TRAINING
+    # ------------------------------------
     # Determine if we are using teacher forcing this iteration
     use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
-
     # Forward batch of sequences through decoder one time step at a time
     if use_teacher_forcing:
         for t in range(max_target_len):
@@ -158,7 +164,7 @@ if __name__ == "__main__":
     embedding = nn.Embedding(voc.num_words, hidden_size)
 
     # Initialize encoder & decoder models
-    encoder = EncoderRNN(hidden_size, embedding, encoder_n_layers, dropout, gate="MogLSTM", bidirectional=True)
+    encoder = EncoderRNN(hidden_size, embedding, encoder_n_layers, dropout, gate="LSTM", bidirectional=True)
     decoder = LuongAttnDecoderRNN(attn_model, embedding, hidden_size,
                                   voc.num_words, decoder_n_layers, dropout, gate="LSTM", bidirectional=False)
 
