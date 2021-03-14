@@ -35,7 +35,7 @@ class MogLSTM(nn.Module):
 
         # TODO: Check source code for processing hidden and cell state
         if not hidden:
-            h1, c1 = hidden[0], hidden[1]
+            h1, c1 = [torch.zeros(batch_size, self.hidden_size), torch.zeros(batch_size, self.hidden_size)]
             h2, c2 = [torch.zeros(batch_size, self.hidden_size), torch.zeros(batch_size, self.hidden_size)]
         else:
             pass
