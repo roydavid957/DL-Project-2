@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.utils.rnn import PackedSequence
+
 from typing import Tuple, List, Dict
-from build_vocabulary import SOS_token
 
 USE_CUDA = torch.cuda.is_available()
 device = torch.device("cuda" if USE_CUDA else "cpu")
@@ -18,11 +19,19 @@ class MogLSTM(nn.Module):
         self.fc = nn.Linear(hidden_size, vocab_size)
         self.drop = nn.Dropout(dropout)
 
-    def forward(self, input_seq, hidden=None):
+    def forward(self, input_seq: PackedSequence, hidden=None):
         """
-        :param input_seq: Default expected Input tensor of shape (seq_len, batch, input_size)
+        :param input_seq: A PackedSequence which is a tuple of 2 tensors, the data itself and their size.
+        Data is a single tensor from all batches in an "optimized" format, e.g. an original tensor of shape (10,3)
+        becomes shape (1,30).
+        batch_sizes (sentence lengths in each batch) tensor that helps PyTorch to keep track of required operations per
+        batch.
         :param hidden: Hidden state and cell state. Not provided for encoder, only for decoder.
         """
+        # NOTES:
+        # - Embedding is not required within the forward pass contrary to the original implementation, it is handled
+        # in EncoderRNN's forward pass
+        # -
         batch_size = input_seq.shape[1]
         seq_len = input_seq[0]
         h1, c1 = [torch.zeros(batch_size, self.hidden_size), torch.zeros(batch_size, self.hidden_size)]
@@ -118,14 +127,6 @@ class EncoderRNN(nn.Module):
         outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs)
         # Sum bidirectional outputs
         outputs = outputs[:, :, :self.hidden_size] + outputs[:, :, self.hidden_size:]
-
-        # print(f"Encoder RNN type:{self.rnn._get_name()}, bidirectional:{self.rnn.bidirectional}")
-        # print("Encoder Output shape:", outputs.size())
-        # try:
-        #     print("Encoder Hidden size:", hidden.size())
-        # except AttributeError:
-        #     print("Encoder Hidden[0] size:", hidden[0].size())
-        #     print("Encoder Hidden[1] size:", hidden[1].size())
 
         # Return output and final hidden state
         return outputs, hidden
@@ -229,15 +230,5 @@ class LuongAttnDecoderRNN(nn.Module):
         # Predict next word using Luong eq. 6
         output = self.out(concat_output)
         output = F.softmax(output, dim=1)
-
-        # # Return output and final hidden state
-        # print(f"Decoder RNN type:{self.rnn._get_name()}, bidirectional:{self.rnn.bidirectional}")
-        # print("Decoder Input_step:", input_step.size())
-        # print("Decoder Input shape:", encoder_outputs.size())
-        # try:
-        #     print("Decoder Hidden size:", last_hidden.size())
-        # except AttributeError:
-        #     print("Decoder Hidden[0] size:", last_hidden[0].size())
-        #     print("Decoder Hidden[1] size:", last_hidden[1].size())
 
         return output, hidden

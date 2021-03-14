@@ -200,5 +200,5 @@ if __name__ == "__main__":
     # Run training iterations
     # --------------------------
     print("Starting Training!")
-    trainIters(model_name, voc, pairs, encoder, decoder, encoder_optimizer, decoder_optimizer,
+    trainIters(voc, pairs, encoder, decoder, encoder_optimizer, decoder_optimizer, embedding,
                n_iteration, batch_size, print_every, clip)
