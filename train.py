@@ -171,7 +171,7 @@ if __name__ == "__main__":
     # decoder = LuongAttnDecoderRNN(attn_model, embedding, hidden_size,
     #                               voc.num_words, decoder_n_layers, dropout, gate="LSTM", bidirectional=False)
 
-    encoder = EncoderMogLSTM(hidden_size, embedding, encoder_n_layers, dropout, voc.num_words)
+    encoder = EncoderMogLSTM(hidden_size, embedding, encoder_n_layers, dropout)
     decoder = LuongAttnDecoderMogLSTM(attn_model, embedding, hidden_size, voc.num_words, decoder_n_layers, dropout)
 
     # Use appropriate device

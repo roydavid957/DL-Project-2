@@ -9,16 +9,13 @@ device = torch.device("cuda" if USE_CUDA else "cpu")
 
 
 class MogLSTM(nn.Module):
-    def __init__(self, input_size, hidden_size, vocab_size, dropout=0, mogrify_steps=5, encoder=False):
+    def __init__(self, input_size, hidden_size, dropout=0, mogrify_steps=5):
         super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.mogrifier_lstm_layer1 = MogLSTMCell(input_size, hidden_size, mogrify_steps)
         self.mogrifier_lstm_layer2 = MogLSTMCell(hidden_size, hidden_size, mogrify_steps)
         self.drop = nn.Dropout(dropout)
-        self.encoder = encoder
-        if not self.encoder:
-            self.fc = nn.Linear(hidden_size, vocab_size)
 
     def forward(self, input_seq, hidden=None):
         """
@@ -42,12 +39,8 @@ class MogLSTM(nn.Module):
             x = self.drop(input_seq[step, :])
             h1, c1 = self.mogrifier_lstm_layer1(x, (h1, c1))  # dropout in default LSTM PyTorch doc. is true
             h2, c2 = self.mogrifier_lstm_layer2(h1, (h2, c2))
-            if self.encoder:
-                out = self.fc(self.drop(h2))
-                outputs.append(out.unsqueeze(0))
-            else:
-                out = self.drop(h2)
-                outputs.append(out.unsqueeze(0))
+            out = self.drop(h2)
+            outputs.append(out.unsqueeze(0))
 
         # Shapes: (seq_len, batch, input_size)
         last_hidden = torch.cat((h1.unsqueeze(0), h2.unsqueeze(0)))  # torch.Size([2, 64, 500])
@@ -88,7 +81,7 @@ class MogLSTMCell(nn.Module):
 
 
 class EncoderMogLSTM(nn.Module):
-    def __init__(self, hidden_size, embedding, n_layers, dropout, vocab_size):
+    def __init__(self, hidden_size, embedding, n_layers, dropout):
         super(EncoderMogLSTM, self).__init__()
         self.n_layers = n_layers
         self.hidden_size = hidden_size
@@ -96,7 +89,7 @@ class EncoderMogLSTM(nn.Module):
 
         # - Initialize RNN; the input_size and hidden_size params are both set to 'hidden_size'
         #   because our input size is a word embedding with number of features == hidden_size
-        self.rnn = MogLSTM(hidden_size, hidden_size, vocab_size, dropout=dropout)
+        self.rnn = MogLSTM(hidden_size, hidden_size, dropout=dropout)
 
     # TODO: Add PackedSequence once the basic method works
     def forward(self, input_seq, input_lengths, hidden=None):  # input_lengths is only used with PackedSequence
@@ -164,7 +157,7 @@ class LuongAttnDecoderMogLSTM(nn.Module):
         self.hidden_size = hidden_size
         self.n_layers = n_layers
         self.dropout = dropout
-        self.rnn = MogLSTM(hidden_size, hidden_size, vocab_size, dropout=dropout)
+        self.rnn = MogLSTM(hidden_size, hidden_size, dropout=dropout)
 
         # Define layers
         self.embedding = embedding
