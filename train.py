@@ -4,6 +4,7 @@ import torch.optim as optim
 import random
 from build_vocabulary import voc, pairs, batch2TrainData, SOS_token, MAX_LENGTH
 from model import EncoderRNN, LuongAttnDecoderRNN
+from model_moglstm import EncoderMogLSTM, LuongAttnDecoderMogLSTM
 
 
 def maskNLLLoss(inp, target, mask):
@@ -42,6 +43,9 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
 
     # Forward pass through encoder
     encoder_outputs, encoder_hidden = encoder(input_variable, lengths)
+    # encoder_outputs.size())  --> GRU/LSTM/MogLSTM: torch.Size([10, 64, 500])
+    # encoder_hidden[0].size())  --> GRU/LSTM: torch.Size([4, 64, 500])  || MogLSTM: torch.Size([2, 64, 500])
+    # encoder_hidden[1].size())  --> GRU/LSTM: torch.Size([4, 64, 500])  || MogLSTM: torch.Size([2, 64, 500])
 
     # ------------------------------------
     # SETTING UP DECODER
@@ -54,12 +58,11 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
         if not decoder.rnn.bidirectional:  # unidirectional LSTM decoder
             decoder_hidden = [encoder_state[:decoder_n_layers] for encoder_state in encoder_hidden]
             # decoder_hidden[0].shape = torch.Size([2, 64, 500]), decoder_hidden[1].shape = torch.Size([2, 64, 500])
-    else:
+    elif decoder.rnn._get_name() == "MogLSTM":
+        decoder_hidden = encoder_hidden
+    else:  # GRU
         if not decoder.rnn.bidirectional:  # unidirectional GRU
             decoder_hidden = encoder_hidden[:decoder.n_layers]
-
-    if decoder.rnn.bidirectional:  # this shall not be used yet, only unidirectional decoder works
-        decoder_hidden = encoder_hidden
 
     # ------------------------------------
     # TRAINING
@@ -164,9 +167,12 @@ if __name__ == "__main__":
     embedding = nn.Embedding(voc.num_words, hidden_size)
 
     # Initialize encoder & decoder models
-    encoder = EncoderRNN(hidden_size, embedding, encoder_n_layers, dropout, gate="LSTM", bidirectional=True)
-    decoder = LuongAttnDecoderRNN(attn_model, embedding, hidden_size,
-                                  voc.num_words, decoder_n_layers, dropout, gate="LSTM", bidirectional=False)
+    # encoder = EncoderRNN(hidden_size, embedding, encoder_n_layers, dropout, gate="LSTM", bidirectional=True)
+    # decoder = LuongAttnDecoderRNN(attn_model, embedding, hidden_size,
+    #                               voc.num_words, decoder_n_layers, dropout, gate="LSTM", bidirectional=False)
+
+    encoder = EncoderMogLSTM(hidden_size, embedding, encoder_n_layers, dropout, voc.num_words)
+    decoder = LuongAttnDecoderMogLSTM(attn_model, embedding, hidden_size, voc.num_words, decoder_n_layers, dropout)
 
     # Use appropriate device
     encoder = encoder.to(device)

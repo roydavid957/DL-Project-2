@@ -50,7 +50,6 @@ class EncoderRNN(nn.Module):
         outputs, _ = nn.utils.rnn.pad_packed_sequence(outputs)
         # # Sum bidirectional outputs
         outputs = outputs[:, :, :self.hidden_size] + outputs[:, :, self.hidden_size:]
-
         # Return output and final hidden state
         return outputs, hidden
 
@@ -128,6 +127,12 @@ class LuongAttnDecoderRNN(nn.Module):
         self.attn = Attn(attn_model, hidden_size + bidirectional * hidden_size)
 
     def forward(self, input_step, last_hidden, encoder_outputs):
+        """
+        :param input_step: torch.Size([1, 64])
+        :param last_hidden: Tuple of tensors containing hidden and cell state: torch.Size([2, 64, 500]), torch.Size([2, 64, 500])
+        :param encoder_outputs: torch.Size([10, 64, 500])
+        :return:
+        """
         # Note: we run this one step (word) at a time
         # Get embedding of current input word
         embedded = self.embedding(input_step)
@@ -135,6 +140,9 @@ class LuongAttnDecoderRNN(nn.Module):
 
         # Forward through unidirectional GRU/LSTM
         if self.gate == "LSTM":
+            # rnn_output size: torch.Size([1, 64, 500])
+            # hidden size: torch.Size([2, 64, 500])
+            # cell_state size: torch.Size([2, 64, 500])
             rnn_output, (hidden, cell_state) = self.rnn(embedded, last_hidden)
             hidden = (hidden, cell_state)
         else:

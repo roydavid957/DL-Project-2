@@ -9,56 +9,52 @@ device = torch.device("cuda" if USE_CUDA else "cpu")
 
 
 class MogLSTM(nn.Module):
-    def __init__(self, input_size, hidden_size, vocab_size, dropout=0, mogrify_steps=5):
+    def __init__(self, input_size, hidden_size, vocab_size, dropout=0, mogrify_steps=5, encoder=False):
         super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.mogrifier_lstm_layer1 = MogLSTMCell(input_size, hidden_size, mogrify_steps)
         self.mogrifier_lstm_layer2 = MogLSTMCell(hidden_size, hidden_size, mogrify_steps)
-        self.fc = nn.Linear(hidden_size, vocab_size)
         self.drop = nn.Dropout(dropout)
+        self.encoder = encoder
+        if not self.encoder:
+            self.fc = nn.Linear(hidden_size, vocab_size)
 
     def forward(self, input_seq, hidden=None):
         """
-        :param input_seq: A PackedSequence which is a tuple of 2 tensors, the data itself and their size.
-        Data is a single tensor from all batches in an "optimized" format, e.g. an original tensor of shape (10,3)
-        becomes shape (1,30).
-        batch_sizes (sentence lengths in each batch) tensor that helps PyTorch to keep track of required operations per
-        batch.
+        :param input_seq:
         :param hidden: Hidden state and cell state. Not provided for encoder, only for decoder.
         """
-        # NOTES:
-        # - Embedding is not required within the forward pass, contrary to the original implementation it is handled
-        # in EncoderRNN's forward pass
         batch_size = input_seq.shape[1]
         seq_len = input_seq.shape[0]
 
-        # TODO: Check source code for processing hidden and cell state
         if not hidden:
             h1, c1 = [torch.zeros(batch_size, self.hidden_size), torch.zeros(batch_size, self.hidden_size)]
             h2, c2 = [torch.zeros(batch_size, self.hidden_size), torch.zeros(batch_size, self.hidden_size)]
         else:
-            pass
+            hidden_states = hidden[0]
+            cell_states = hidden[1]
+            h1, c1 = hidden_states[0], cell_states[0]
+            h2, c2 = hidden_states[1], cell_states[1]
 
-        hidden_states = []
         outputs = []
         for step in range(seq_len):
             x = self.drop(input_seq[step, :])
             h1, c1 = self.mogrifier_lstm_layer1(x, (h1, c1))  # dropout in default LSTM PyTorch doc. is true
             h2, c2 = self.mogrifier_lstm_layer2(h1, (h2, c2))
-            out = self.fc(self.drop(h2))
-            hidden_states.append(h2.unsqueeze(1))
-            outputs.append(out.unsqueeze(1))
+            if self.encoder:
+                out = self.fc(self.drop(h2))
+                outputs.append(out.unsqueeze(0))
+            else:
+                out = self.drop(h2)
+                outputs.append(out.unsqueeze(0))
 
-        hidden_states = torch.cat(hidden_states, dim=1)
-        # Shape: (batch, seq_len, input_size) --> (seq_len, batch, input_size)
-        hidden_states = hidden_states.transpose(1, 0)
+        # Shapes: (seq_len, batch, input_size)
+        last_hidden = torch.cat((h1.unsqueeze(0), h2.unsqueeze(0)))  # torch.Size([2, 64, 500])
+        last_cell = torch.cat((c1.unsqueeze(0), c2.unsqueeze(0)))  # torch.Size([2, 64, 500])
+        outputs = torch.cat(outputs, dim=0)  # torch.Size([10, 64, 500])
 
-        outputs = torch.cat(outputs, dim=1)
-        # Shape: (batch, seq_len, input_size) --> (seq_len, batch, input_size)
-        outputs = outputs.transpose(1, 0)
-
-        return outputs, hidden_states
+        return outputs, (last_hidden, last_cell)
 
 
 class MogLSTMCell(nn.Module):
@@ -92,7 +88,7 @@ class MogLSTMCell(nn.Module):
 
 
 class EncoderMogLSTM(nn.Module):
-    def __init__(self, hidden_size, embedding, n_layers, dropout, voc):
+    def __init__(self, hidden_size, embedding, n_layers, dropout, vocab_size):
         super(EncoderMogLSTM, self).__init__()
         self.n_layers = n_layers
         self.hidden_size = hidden_size
@@ -100,7 +96,7 @@ class EncoderMogLSTM(nn.Module):
 
         # - Initialize RNN; the input_size and hidden_size params are both set to 'hidden_size'
         #   because our input size is a word embedding with number of features == hidden_size
-        self.rnn = MogLSTM(hidden_size, hidden_size, voc.num_words, dropout=dropout)
+        self.rnn = MogLSTM(hidden_size, hidden_size, vocab_size, dropout=dropout)
 
     # TODO: Add PackedSequence once the basic method works
     def forward(self, input_seq, input_lengths, hidden=None):  # input_lengths is only used with PackedSequence
@@ -159,27 +155,30 @@ class Attn(nn.Module):
 
 
 class LuongAttnDecoderMogLSTM(nn.Module):
-    def __init__(self, attn_model, embedding, hidden_size, output_size,
-                 n_layers, dropout, voc, gate=None, bidirectional=False):
+    def __init__(self, attn_model, embedding, hidden_size, vocab_size, n_layers, dropout):
+
         super(LuongAttnDecoderMogLSTM, self).__init__()
 
         # Keep for reference
         self.attn_model = attn_model
         self.hidden_size = hidden_size
-        self.output_size = output_size
         self.n_layers = n_layers
         self.dropout = dropout
-        self.gate = gate
-        self.rnn = MogLSTM(hidden_size, hidden_size, voc.num_words, dropout=dropout)
+        self.rnn = MogLSTM(hidden_size, hidden_size, vocab_size, dropout=dropout)
 
         # Define layers
         self.embedding = embedding
         self.embedding_dropout = nn.Dropout(dropout)
         self.concat = nn.Linear(hidden_size * 2, hidden_size)
-        self.out = nn.Linear(hidden_size, output_size)
-        self.attn = Attn(attn_model, hidden_size + bidirectional * hidden_size)
+        self.out = nn.Linear(hidden_size, vocab_size)
+        self.attn = Attn(attn_model, hidden_size)
 
     def forward(self, input_step, last_hidden, encoder_outputs):
+        """
+        :param input_step:
+        :param last_hidden: Tuple of tensors containing hidden and cell state with shapes (2, 64, 500), (2, 64, 500)
+        :param encoder_outputs: Sequence of outputs of shape torch.Size([10, 64, 500])
+        """
         # NOTE: we run this one step (word) at a time, parallel in each batch
 
         # Get embedding of current input word
@@ -196,9 +195,7 @@ class LuongAttnDecoderMogLSTM(nn.Module):
         # Concatenate weighted context vector and GRU output using Luong eq. 5
         rnn_output = rnn_output.squeeze(0)
         context = context.squeeze(1)
-
         concat_input = torch.cat((rnn_output, context), 1)
-        # MogLSTM concat_input size: torch.Size([64, 15652])
 
         concat_output = torch.tanh(self.concat(concat_input))
         # Predict next word using Luong eq. 6
