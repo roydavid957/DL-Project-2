@@ -124,7 +124,7 @@ class LuongAttnDecoderRNN(nn.Module):
 
         self.concat = nn.Linear(hidden_size * 2, hidden_size)
         self.out = nn.Linear(hidden_size, output_size)
-        self.attn = Attn(attn_model, hidden_size + bidirectional * hidden_size)
+        self.attn = Attn(attn_model, hidden_size)
 
     def forward(self, input_step, last_hidden, encoder_outputs):
         """

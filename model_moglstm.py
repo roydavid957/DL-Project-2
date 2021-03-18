@@ -3,18 +3,23 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import PackedSequence
 from typing import Tuple, List, Dict
+from model import Attn
 
 USE_CUDA = torch.cuda.is_available()
 device = torch.device("cuda" if USE_CUDA else "cpu")
 
 
 class MogLSTM(nn.Module):
-    def __init__(self, input_size, hidden_size, dropout=0, mogrify_steps=5):
+    def __init__(self, input_size, hidden_size, dropout=0, mogrify_steps=5, bidirectional=False, cell_num=2):
         super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
-        self.mogrifier_lstm_layer1 = MogLSTMCell(input_size, hidden_size, mogrify_steps)
-        self.mogrifier_lstm_layer2 = MogLSTMCell(hidden_size, hidden_size, mogrify_steps)
+        self.fwd_layers = [MogLSTMCell(input_size, hidden_size, mogrify_steps) for _ in range(cell_num)]
+        print("MogLSTMCell", MogLSTMCell(input_size, hidden_size, mogrify_steps))
+        print("self.fwd_layers", self.fwd_layers)
+        self.bidirectional = bidirectional
+        if self.bidirectional:
+            self.bwd_layers = [MogLSTMCell(input_size, hidden_size, mogrify_steps) for _ in range(cell_num)]
         self.drop = nn.Dropout(dropout)
 
     def forward(self, input_seq, hidden=None):
@@ -25,21 +30,48 @@ class MogLSTM(nn.Module):
         batch_size = input_seq.shape[1]
         seq_len = input_seq.shape[0]
 
+        def init_states(batch_size, hidden_size):
+            """ Function for creating zero-valued hidden_state & cell_state tensors list """
+            return [torch.zeros(batch_size, hidden_size).to(device),
+                    torch.zeros(batch_size, hidden_size).to(device)]
+
         if not hidden:
-            h1, c1 = [torch.zeros(batch_size, self.hidden_size), torch.zeros(batch_size, self.hidden_size)]
-            h2, c2 = [torch.zeros(batch_size, self.hidden_size), torch.zeros(batch_size, self.hidden_size)]
+            fwd_h1, fwd_c1 = init_states(batch_size, self.hidden_size)
+            fwd_h2, fwd_c2 = init_states(batch_size, self.hidden_size)
+            if self.bidirectional:
+                bwd_h1, bwd_c1 = init_states(batch_size, self.hidden_size)
+                bwd_h2, bwd_c2 = init_states(batch_size, self.hidden_size)
         else:
             hidden_states = hidden[0]
             cell_states = hidden[1]
-            h1, c1 = hidden_states[0], cell_states[0]
-            h2, c2 = hidden_states[1], cell_states[1]
+            if self.bidirectional:
+                fwd_half = len(hidden_states[0])//2
+                fwd_h1, fwd_c1 = hidden_states[0][0:fwd_half], cell_states[0][0:fwd_half]
+                fwd_h2, fwd_c2 = hidden_states[1][0:fwd_half], cell_states[1][0:fwd_half]
+                bwd_h1, bwd_c1 = hidden_states[0][fwd_half:], cell_states[0][fwd_half:]
+                bwd_h2, bwd_c2 = hidden_states[1][fwd_half:], cell_states[1][fwd_half:]
+            else:
+                fwd_h1, fwd_c1 = hidden_states[0], cell_states[0]
+                fwd_h2, fwd_c2 = hidden_states[1], cell_states[1]
 
         outputs = []
         for step in range(seq_len):
-            x = self.drop(input_seq[step, :])
-            h1, c1 = self.mogrifier_lstm_layer1(x, (h1, c1))  # dropout in default LSTM PyTorch doc. is true
-            h2, c2 = self.mogrifier_lstm_layer2(h1, (h2, c2))
-            out = self.drop(h2)
+            fwd_x = self.drop(input_seq[step, :])
+            fwd_h1, fwd_c1 = self.fwd_layers[0](fwd_x, (fwd_h1, fwd_c1))
+            fwd_h2, fwd_c2 = self.fwd_layers[1](fwd_h1, (fwd_h2, fwd_c2))
+            if self.bidirectional:
+                bwd_x = self.drop(input_seq[len(seq_len) - step, :])
+                bwd_h1, bwd_c1 = self.bwd_layers[0](bwd_x, (bwd_h1, bwd_c1))
+                bwd_h2, bwd_c2 = self.bwd_layers[1](bwd_h1, (bwd_h2, bwd_c2))
+                h1, c1 = torch.cat((fwd_h1, bwd_h1)), torch.cat((fwd_c1, bwd_c1))
+                h2, c2 = torch.cat((fwd_h2, bwd_h1)), torch.cat((fwd_c2, bwd_c2))
+                out = self.drop(h2)
+                out = out[:, :, :self.hidden_size] + out[:, :, self.hidden_size:]
+            else:
+                h1, c1 = fwd_h1, fwd_c1
+                h2, c2 = fwd_h2, fwd_c2
+                out = self.drop(h2)
+
             outputs.append(out.unsqueeze(0))
 
         # Shapes: (seq_len, batch, input_size)
@@ -73,8 +105,7 @@ class MogLSTMCell(nn.Module):
 
     def forward(self, x, states):
         ht, ct = states
-        ht = ht.to(device)
-        ct = ct.to(device)
+        x, ht, ct = [old.to(device) for old in [x, ht, ct]]
         x, ht = self.mogrify(x, ht)
         ht, ct = self.lstm(x, (ht, ct))
         return ht, ct
@@ -104,47 +135,6 @@ class EncoderMogLSTM(nn.Module):
 
         # Return output and final hidden state
         return outputs, hidden
-
-
-# Luong attention layer
-class Attn(nn.Module):
-    def __init__(self, method, hidden_size):
-        super(Attn, self).__init__()
-        self.method = method
-        if self.method not in ['dot', 'general', 'concat']:
-            raise ValueError(self.method, "is not an appropriate attention method.")
-        self.hidden_size = hidden_size
-        if self.method == 'general':
-            self.attn = nn.Linear(self.hidden_size, hidden_size)
-        elif self.method == 'concat':
-            self.attn = nn.Linear(self.hidden_size * 2, hidden_size)
-            self.v = nn.Parameter(torch.FloatTensor(hidden_size))
-
-    def dot_score(self, hidden, encoder_output):
-        return torch.sum(hidden * encoder_output, dim=2)
-
-    def general_score(self, hidden, encoder_output):
-        energy = self.attn(encoder_output)
-        return torch.sum(hidden * energy, dim=2)
-
-    def concat_score(self, hidden, encoder_output):
-        energy = self.attn(torch.cat((hidden.expand(encoder_output.size(0), -1, -1), encoder_output), 2)).tanh()
-        return torch.sum(self.v * energy, dim=2)
-
-    def forward(self, hidden, encoder_outputs):
-        # Calculate the attention weights (energies) based on the given method
-        if self.method == 'general':
-            attn_energies = self.general_score(hidden, encoder_outputs)
-        elif self.method == 'concat':
-            attn_energies = self.concat_score(hidden, encoder_outputs)
-        elif self.method == 'dot':
-            attn_energies = self.dot_score(hidden, encoder_outputs)
-
-        # Transpose max_length and batch_size dimensions
-        attn_energies = attn_energies.t()
-
-        # Return the softmax normalized probability scores (with added dimension)
-        return F.softmax(attn_energies, dim=1).unsqueeze(1)
 
 
 class LuongAttnDecoderMogLSTM(nn.Module):
