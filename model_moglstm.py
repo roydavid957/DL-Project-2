@@ -15,8 +15,6 @@ class MogLSTM(nn.Module):
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.fwd_layers = [MogLSTMCell(input_size, hidden_size, mogrify_steps) for _ in range(cell_num)]
-        print("MogLSTMCell", MogLSTMCell(input_size, hidden_size, mogrify_steps))
-        print("self.fwd_layers", self.fwd_layers)
         self.bidirectional = bidirectional
         if self.bidirectional:
             self.bwd_layers = [MogLSTMCell(input_size, hidden_size, mogrify_steps) for _ in range(cell_num)]
@@ -32,12 +30,14 @@ class MogLSTM(nn.Module):
 
         def init_states(batch_size, hidden_size):
             """ Function for creating zero-valued hidden_state & cell_state tensors list """
-            return [torch.zeros(batch_size, hidden_size).to(device),
-                    torch.zeros(batch_size, hidden_size).to(device)]
+            return [torch.zeros(batch_size, hidden_size),
+                    torch.zeros(batch_size, hidden_size)]
 
         if not hidden:
             fwd_h1, fwd_c1 = init_states(batch_size, self.hidden_size)
             fwd_h2, fwd_c2 = init_states(batch_size, self.hidden_size)
+            h1, c1 = [torch.zeros(batch_size, self.hidden_size), torch.zeros(batch_size, self.hidden_size)]
+            h2, c2 = [torch.zeros(batch_size, self.hidden_size), torch.zeros(batch_size, self.hidden_size)]
             if self.bidirectional:
                 bwd_h1, bwd_c1 = init_states(batch_size, self.hidden_size)
                 bwd_h2, bwd_c2 = init_states(batch_size, self.hidden_size)
