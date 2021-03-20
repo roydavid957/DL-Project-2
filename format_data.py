@@ -146,7 +146,7 @@ def extract_and_split_conversation_lines(conversations: List[dict]) -> Tuple[lis
     return rows_all, rows_split
 
 
-def write_data(new_file: str, conversations, query_reply=False):
+def write_data(new_file: str, conversations, query_reply):
     """ Write new file from extracted conversations,
      e.g. "formatted_movie_convQR_lines.txt", "formatted_movie_conv_lines.txt """
 
@@ -208,18 +208,20 @@ if __name__ == '__main__':
     print("total_lines_valid:", total_lines_valid)
     print("total_lines_test:", total_lines_test)
 
-    # write_data(datafile, conversations_all, query_reply=False)
-    # write_data(datafile_train, conversations_split["train"])
-    # write_data(datafile_valid, conversations_split["valid"])
-    # write_data(datafile_test, conversations_split["test"])
+    write_data(datafile, conversations_all, query_reply=False)
+    write_data(datafile_train, conversations_split["train"], query_reply=False)
+    write_data(datafile_valid, conversations_split["valid"], query_reply=False)
+    write_data(datafile_test, conversations_split["test"], query_reply=False)
 
     qa_pairs_all, qa_pairs_split = extract_and_split_sentence_pairs(conversations)
-    write_data(datafile_qr_train, qa_pairs_split["train"])
-    write_data(datafile_qr_valid, qa_pairs_split["valid"])
-    write_data(datafile_qr_test, qa_pairs_split["test"])
-
-    # Print a sample of lines
-    # print("\nSample lines from file:")
-    # printLines(datafile_convQR)
-    # print("\n\n")
-    # printLines(datafile_conv)
+    # Sanity check 2
+    total_pairs_train = sum(
+        [len(qa_pairs_split["train"][idx]) for idx, conversation in enumerate(qa_pairs_split["train"])])
+    total_pairs_valid = sum(
+        [len(qa_pairs_split["valid"][idx]) for idx, conversation in enumerate(qa_pairs_split["valid"])])
+    total_pairs_test = sum(
+        [len(qa_pairs_split["test"][idx]) for idx, conversation in enumerate(qa_pairs_split["test"])])
+    write_data(datafile_qr, qa_pairs_all, query_reply=True)
+    write_data(datafile_qr_train, qa_pairs_split["train"], query_reply=True)
+    write_data(datafile_qr_valid, qa_pairs_split["valid"], query_reply=True)
+    write_data(datafile_qr_test, qa_pairs_split["test"], query_reply=True)
