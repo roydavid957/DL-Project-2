@@ -9,65 +9,98 @@ USE_CUDA = torch.cuda.is_available()
 device = torch.device("cuda" if USE_CUDA else "cpu")
 
 
-class MogLSTM(nn.Module):
-    """ Class for both encoder and decoder, both unidirectional and bidirectional type of Mogrifier LSTM.
-    The following tensor shape restrictions must be met when """
-    def __init__(self, input_size, hidden_size, dropout=0, mogrify_steps=5, bidirectional=False, cell_num=2):
+class MogLSTM_BiDir(nn.Module):
+    """ Bidirectional Mogrifier LSTM, can be used for Encoder only """
+
+    def __init__(self, input_size, hidden_size, dropout=0, mogrify_steps=5, cell_num=2):
         super().__init__()
+        self.bidirectional = True
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.fwd_layers = nn.ModuleList([MogLSTMCell(input_size, hidden_size, mogrify_steps) for _ in range(cell_num)])
-        self.bidirectional = bidirectional
-        print("bidirectional:", self.bidirectional)
-        if self.bidirectional:
-            self.bwd_layers = nn.ModuleList([MogLSTMCell(input_size, hidden_size, mogrify_steps) for _ in range(cell_num)])
+        self.bwd_layers = nn.ModuleList([MogLSTMCell(input_size, hidden_size, mogrify_steps) for _ in range(cell_num)])
         self.drop = nn.Dropout(dropout)
+
+    @staticmethod
+    def init_states(batch_size, hidden_size):
+        """ Function for creating zero-valued hidden_state & cell_state tensors list """
+        return [torch.zeros(batch_size, hidden_size),
+                torch.zeros(batch_size, hidden_size)]
 
     def forward(self, input_seq, hidden=None):
         """
         :param input_seq:
-        :param hidden: Hidden state and cell state. Not provided for encoder, only for decoder.
+        :param hidden: Hidden state and cell state. Not used for encoder, only for decoder.
         """
         batch_size = input_seq.shape[1]
         seq_len = input_seq.shape[0]
 
-        def init_states(batch_size, hidden_size):
-            """ Function for creating zero-valued hidden_state & cell_state tensors list """
-            return [torch.zeros(batch_size, hidden_size),
-                    torch.zeros(batch_size, hidden_size)]
-
-        if not hidden:
-            fwd_h1, fwd_c1 = init_states(batch_size, self.hidden_size)
-            fwd_h2, fwd_c2 = init_states(batch_size, self.hidden_size)
-            h1, c1 = [torch.zeros(batch_size, self.hidden_size), torch.zeros(batch_size, self.hidden_size)]
-            h2, c2 = [torch.zeros(batch_size, self.hidden_size), torch.zeros(batch_size, self.hidden_size)]
-            if self.bidirectional:
-                bwd_h1, bwd_c1 = init_states(batch_size, self.hidden_size)
-                bwd_h2, bwd_c2 = init_states(batch_size, self.hidden_size)
-        else:
-            hidden_states = hidden[0]
-            cell_states = hidden[1]
-            fwd_half = len(hidden_states[-1])//2
-            fwd_h1, fwd_c1 = hidden_states[0][:, 0:fwd_half], cell_states[0][:, 0:fwd_half]
-            fwd_h2, fwd_c2 = hidden_states[1][:, 0:fwd_half], cell_states[1][:, 0:fwd_half]
-            if self.bidirectional:
-                bwd_h1, bwd_c1 = hidden_states[0][:, fwd_half:], cell_states[0][:, fwd_half:]
-                bwd_h2, bwd_c2 = hidden_states[1][:, fwd_half:], cell_states[1][:, fwd_half:]
+        fwd_h1, fwd_c1 = self.init_states(batch_size, self.hidden_size)
+        fwd_h2, fwd_c2 = self.init_states(batch_size, self.hidden_size)
+        bwd_h1, bwd_c1 = self.init_states(batch_size, self.hidden_size)
+        bwd_h2, bwd_c2 = self.init_states(batch_size, self.hidden_size)
 
         outputs = []
         for step in range(seq_len):
             fwd_x = self.drop(input_seq[step, :])
             fwd_h1, fwd_c1 = self.fwd_layers[0](fwd_x, (fwd_h1, fwd_c1))
             fwd_h2, fwd_c2 = self.fwd_layers[1](fwd_h1, (fwd_h2, fwd_c2))
-            if self.bidirectional:
-                bwd_x = self.drop(input_seq[seq_len - (step+1), :])
-                bwd_h1, bwd_c1 = self.bwd_layers[0](bwd_x, (bwd_h1, bwd_c1))
-                bwd_h2, bwd_c2 = self.bwd_layers[1](bwd_h1, (bwd_h2, bwd_c2))
-                h1, c1 = torch.cat((fwd_h1, bwd_h1)), torch.cat((fwd_c1, bwd_c1))
-                h2, c2 = torch.cat((fwd_h2, bwd_h2), dim=1), torch.cat((fwd_c2, bwd_c2))
-            else:
-                h1, c1 = fwd_h1, fwd_c1
-                h2, c2 = fwd_h2, fwd_c2
+
+            bwd_x = self.drop(input_seq[seq_len - (step + 1), :])
+            bwd_h1, bwd_c1 = self.bwd_layers[0](bwd_x, (bwd_h1, bwd_c1))
+            bwd_h2, bwd_c2 = self.bwd_layers[1](bwd_h1, (bwd_h2, bwd_c2))
+
+            out = self.drop(torch.cat((fwd_h2, bwd_h2), dim=1))  # [(64, 500), (64, 500)] --> [(64, 1000)]
+            outputs.append(out.unsqueeze(0))  # [[1, 64, 1000], [1, 64, 1000], ..., [1, 64, 1000]]
+
+        # Same type of seshaping applied to h1, c1, h2, c2, that is: [(64, 500), (64,500)] --> [(2, 64, 500)]
+        h1, c1 = torch.cat((fwd_h1.unsqueeze(0), bwd_h1.unsqueeze(0))), torch.cat((fwd_c1.unsqueeze(0), bwd_c1.unsqueeze(0)))
+        h2, c2 = torch.cat((fwd_h2.unsqueeze(0), bwd_h2.unsqueeze(0))), torch.cat((fwd_c2.unsqueeze(0), bwd_c2.unsqueeze(0)))
+
+        # Shapes: (num_layers*directions, batch_size, input_size)
+        last_hidden = torch.cat((h1, h2))  # [(2, 64, 500)] --> [(4, 64, 500)]
+        last_cell = torch.cat((c1, c2))  # [(2, 64, 500)] --> [(4, 64, 500)]
+
+        outputs = torch.cat(outputs, dim=0)  # list of 10 tensors of (64, 1000) --> [(10, 64, 1000)]
+        # Shapes: (seq_len, batch, input_size)
+        outputs = outputs[:, :, :self.hidden_size] + outputs[:, :, self.hidden_size:] # [(10, 64, 1000)] --> [(10, 64, 500)]
+
+        return outputs, (last_hidden, last_cell)
+
+
+class MogLSTM_UniDir(nn.Module):
+    """ Unidirectional Mogrifier LSTM, can be used for both Encoder and Decoder """
+
+    def __init__(self, input_size, hidden_size, dropout=0, mogrify_steps=5, cell_num=2):
+        super().__init__()
+        self.bidirectional = False
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.layers = nn.ModuleList([MogLSTMCell(input_size, hidden_size, mogrify_steps) for _ in range(cell_num)])
+        self.drop = nn.Dropout(dropout)
+
+    def forward(self, input_seq, hidden):
+        """
+        :param input_seq:
+        :param hidden: Hidden state and cell state. Not used for encoder, only for decoder.
+        """
+        batch_size = input_seq.shape[1]
+        seq_len = input_seq.shape[0]
+
+        if hidden: # as mentioned above, only used for decoder
+            hidden_states = hidden[0]
+            cell_states = hidden[1]
+            h1, c1 = hidden_states[0], cell_states[0]
+            h2, c2 = hidden_states[1], cell_states[1]
+        else:
+            h1, c1 = MogLSTM_BiDir.init_states(batch_size, self.hidden_size)
+            h2, c2 = MogLSTM_BiDir.init_states(batch_size, self.hidden_size)
+
+        outputs = []
+        for step in range(seq_len):
+            x = self.drop(input_seq[step, :])
+            h1, c1 = self.layers[0](x, (h1, c1))
+            h2, c2 = self.layers[1](h1, (h2, c2))
             out = self.drop(h2)
             outputs.append(out.unsqueeze(0))
 
@@ -75,10 +108,6 @@ class MogLSTM(nn.Module):
         last_hidden = torch.cat((h1.unsqueeze(0), h2.unsqueeze(0)))  # torch.Size([2, 64, 500])
         last_cell = torch.cat((c1.unsqueeze(0), c2.unsqueeze(0)))  # torch.Size([2, 64, 500])
         outputs = torch.cat(outputs, dim=0)  # torch.Size([10, 64, 500])
-
-        if self.bidirectional:
-            outputs = outputs[:, :, :self.hidden_size] + outputs[:, :, self.hidden_size:]
-        print("outputs", outputs.size())
 
         return outputs, (last_hidden, last_cell)
 
@@ -113,15 +142,15 @@ class MogLSTMCell(nn.Module):
 
 
 class EncoderMogLSTM(nn.Module):
-    def __init__(self, hidden_size, embedding, n_layers, dropout, bidirectional=False):
+    def __init__(self, hidden_size, embedding, n_layers, dropout, bidirectional):
         super(EncoderMogLSTM, self).__init__()
         self.n_layers = n_layers
         self.hidden_size = hidden_size
         self.embedding = embedding
-
-        # - Initialize RNN; the input_size and hidden_size params are both set to 'hidden_size'
-        #   because our input size is a word embedding with number of features == hidden_size
-        self.rnn = MogLSTM(hidden_size, hidden_size, dropout=dropout, bidirectional=bidirectional)
+        if bidirectional:
+            self.rnn = MogLSTM_BiDir(hidden_size, hidden_size, dropout=dropout)
+        else:
+            self.rnn = MogLSTM_UniDir(hidden_size, hidden_size, dropout=dropout)
 
     # TODO: Add PackedSequence once the basic method works
     def forward(self, input_seq, input_lengths, hidden=None):  # input_lengths is only used with PackedSequence
@@ -148,7 +177,7 @@ class LuongAttnDecoderMogLSTM(nn.Module):
         self.hidden_size = hidden_size
         self.n_layers = n_layers
         self.dropout = dropout
-        self.rnn = MogLSTM(hidden_size, hidden_size, dropout=dropout)
+        self.rnn = MogLSTM_UniDir(hidden_size, hidden_size, dropout=dropout)
 
         # Define layers
         self.embedding = embedding
