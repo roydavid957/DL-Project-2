@@ -10,14 +10,17 @@ device = torch.device("cuda" if USE_CUDA else "cpu")
 
 
 class MogLSTM(nn.Module):
+    """ Class for both encoder and decoder, both unidirectional and bidirectional type of Mogrifier LSTM.
+    The following tensor shape restrictions must be met when """
     def __init__(self, input_size, hidden_size, dropout=0, mogrify_steps=5, bidirectional=False, cell_num=2):
         super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
-        self.fwd_layers = [MogLSTMCell(input_size, hidden_size, mogrify_steps) for _ in range(cell_num)]
+        self.fwd_layers = nn.ModuleList([MogLSTMCell(input_size, hidden_size, mogrify_steps) for _ in range(cell_num)])
         self.bidirectional = bidirectional
+        print("bidirectional:", self.bidirectional)
         if self.bidirectional:
-            self.bwd_layers = [MogLSTMCell(input_size, hidden_size, mogrify_steps) for _ in range(cell_num)]
+            self.bwd_layers = nn.ModuleList([MogLSTMCell(input_size, hidden_size, mogrify_steps) for _ in range(cell_num)])
         self.drop = nn.Dropout(dropout)
 
     def forward(self, input_seq, hidden=None):
@@ -44,15 +47,12 @@ class MogLSTM(nn.Module):
         else:
             hidden_states = hidden[0]
             cell_states = hidden[1]
+            fwd_half = len(hidden_states[-1])//2
+            fwd_h1, fwd_c1 = hidden_states[0][:, 0:fwd_half], cell_states[0][:, 0:fwd_half]
+            fwd_h2, fwd_c2 = hidden_states[1][:, 0:fwd_half], cell_states[1][:, 0:fwd_half]
             if self.bidirectional:
-                fwd_half = len(hidden_states[0])//2
-                fwd_h1, fwd_c1 = hidden_states[0][0:fwd_half], cell_states[0][0:fwd_half]
-                fwd_h2, fwd_c2 = hidden_states[1][0:fwd_half], cell_states[1][0:fwd_half]
-                bwd_h1, bwd_c1 = hidden_states[0][fwd_half:], cell_states[0][fwd_half:]
-                bwd_h2, bwd_c2 = hidden_states[1][fwd_half:], cell_states[1][fwd_half:]
-            else:
-                fwd_h1, fwd_c1 = hidden_states[0], cell_states[0]
-                fwd_h2, fwd_c2 = hidden_states[1], cell_states[1]
+                bwd_h1, bwd_c1 = hidden_states[0][:, fwd_half:], cell_states[0][:, fwd_half:]
+                bwd_h2, bwd_c2 = hidden_states[1][:, fwd_half:], cell_states[1][:, fwd_half:]
 
         outputs = []
         for step in range(seq_len):
@@ -60,24 +60,25 @@ class MogLSTM(nn.Module):
             fwd_h1, fwd_c1 = self.fwd_layers[0](fwd_x, (fwd_h1, fwd_c1))
             fwd_h2, fwd_c2 = self.fwd_layers[1](fwd_h1, (fwd_h2, fwd_c2))
             if self.bidirectional:
-                bwd_x = self.drop(input_seq[len(seq_len) - step, :])
+                bwd_x = self.drop(input_seq[seq_len - (step+1), :])
                 bwd_h1, bwd_c1 = self.bwd_layers[0](bwd_x, (bwd_h1, bwd_c1))
                 bwd_h2, bwd_c2 = self.bwd_layers[1](bwd_h1, (bwd_h2, bwd_c2))
                 h1, c1 = torch.cat((fwd_h1, bwd_h1)), torch.cat((fwd_c1, bwd_c1))
-                h2, c2 = torch.cat((fwd_h2, bwd_h1)), torch.cat((fwd_c2, bwd_c2))
-                out = self.drop(h2)
-                out = out[:, :, :self.hidden_size] + out[:, :, self.hidden_size:]
+                h2, c2 = torch.cat((fwd_h2, bwd_h2), dim=1), torch.cat((fwd_c2, bwd_c2))
             else:
                 h1, c1 = fwd_h1, fwd_c1
                 h2, c2 = fwd_h2, fwd_c2
-                out = self.drop(h2)
-
+            out = self.drop(h2)
             outputs.append(out.unsqueeze(0))
 
         # Shapes: (seq_len, batch, input_size)
         last_hidden = torch.cat((h1.unsqueeze(0), h2.unsqueeze(0)))  # torch.Size([2, 64, 500])
         last_cell = torch.cat((c1.unsqueeze(0), c2.unsqueeze(0)))  # torch.Size([2, 64, 500])
         outputs = torch.cat(outputs, dim=0)  # torch.Size([10, 64, 500])
+
+        if self.bidirectional:
+            outputs = outputs[:, :, :self.hidden_size] + outputs[:, :, self.hidden_size:]
+        print("outputs", outputs.size())
 
         return outputs, (last_hidden, last_cell)
 
@@ -112,7 +113,7 @@ class MogLSTMCell(nn.Module):
 
 
 class EncoderMogLSTM(nn.Module):
-    def __init__(self, hidden_size, embedding, n_layers, dropout):
+    def __init__(self, hidden_size, embedding, n_layers, dropout, bidirectional=False):
         super(EncoderMogLSTM, self).__init__()
         self.n_layers = n_layers
         self.hidden_size = hidden_size
@@ -120,7 +121,7 @@ class EncoderMogLSTM(nn.Module):
 
         # - Initialize RNN; the input_size and hidden_size params are both set to 'hidden_size'
         #   because our input size is a word embedding with number of features == hidden_size
-        self.rnn = MogLSTM(hidden_size, hidden_size, dropout=dropout)
+        self.rnn = MogLSTM(hidden_size, hidden_size, dropout=dropout, bidirectional=bidirectional)
 
     # TODO: Add PackedSequence once the basic method works
     def forward(self, input_seq, input_lengths, hidden=None):  # input_lengths is only used with PackedSequence
