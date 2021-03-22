@@ -1,0 +1,35 @@
+Default dataset:
+- Entire dataset:
+	- Read 83097 sentence pairs
+	- Trimmed to 25923 pairs
+	- Counted words: 12691
+- Training set:
+	- Read 49517 sentence pairs
+	- Trimmed to 15579 pairs
+	- Counted words: 9395
+- Validation set:
+	- Read 16710 sentence pairs
+	- Trimmed to 5322 pairs
+	- Counted words: 4663
+- Test set:
+	- Read 16870 sentence pairs
+	- Trimmed to 5022 pairs
+	- Counted words: 4671
+
+With query-reply:
+- Entire dataset:
+	- Read 221282 sentence pairs
+	- Trimmed to 64271 pairs
+	- Counted words: 18008
+- Training set:
+	- Read 132769 sentence pairs
+	- Trimmed to 38711 pairs
+	- Counted words: 13418
+- Validation set:
+	- Read 44254 sentence pairs
+	- Trimmed to 13143 pairs
+	- Counted words: 7006
+- Test set:
+	- Read 44251 sentence pairs
+	- Trimmed to 12415 pairs
+	- Counted words: 6979
