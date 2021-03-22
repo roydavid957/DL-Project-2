@@ -2,7 +2,9 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import random
-from build_vocabulary import voc, pairs, batch2TrainData, SOS_token, MAX_LENGTH
+from typing import Union
+
+from build_vocabulary import voc, pairs, batch2TrainData, SOS_token
 from model import EncoderRNN, LuongAttnDecoderRNN
 from model_moglstm import EncoderMogLSTM, LuongAttnDecoderMogLSTM
 
@@ -23,11 +25,30 @@ def maskNLLLoss(inp, target, mask):
     return loss, nTotal.item()
 
 
-def train(input_variable, lengths, target_variable, mask, max_target_len, encoder, decoder,
-          encoder_optimizer, decoder_optimizer, batch_size, clip):
-    # Zero gradients
-    encoder_optimizer.zero_grad()
-    decoder_optimizer.zero_grad()
+def set_decoder_hidden(encoder_hidden):
+    """ Function for extracting the last hidden (and cell) states after the encoder's forward pass, which is passed to
+     the decoder's hidden (and cell) states """
+    name = decoder.rnn._get_name()
+    # Set initial decoder hidden state to the encoder's final hidden state
+    if name == "LSTM":
+        decoder_hidden = (encoder_state[:decoder.n_layers] for encoder_state in encoder_hidden)
+        # decoder_hidden[0].shape = torch.Size([2, 64, 500]), decoder_hidden[1].shape = torch.Size([2, 64, 500])
+    elif name == "MogLSTM":
+        decoder_hidden = encoder_hidden
+    else:  # GRU
+        decoder_hidden = encoder_hidden[:decoder.n_layers]
+
+    if name in ["LSTM", "MogLSTM"] and not isinstance(decoder_hidden, tuple):
+        raise ValueError("'decoder_hidden' was supposed to be assigned a 'tuple', assignment has failed.")
+    elif name == "GRU" and not isinstance(decoder_hidden, torch.Tensor):
+        raise ValueError("'decoder_hidden' was supposed to be assigned a 'torch.Tensor', assignment has failed.")
+
+    return decoder_hidden
+
+
+
+def run(input_variable, lengths, target_variable, mask, max_target_len, encoder, decoder,
+        encoder_optimizer, decoder_optimizer, batch_size, clip, dataset_type):
 
     # Set device options
     input_variable = input_variable.to(device)
@@ -43,55 +64,27 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
 
     # Forward pass through encoder
     encoder_outputs, encoder_hidden = encoder(input_variable, lengths)
-    # print("encoder_outputs", encoder_outputs.shape)
-    # print("encoder_hidden[0]", encoder_hidden[0].size())
-    # print("encoder_hidden[1]", encoder_hidden[1].size())
-
     # encoder_outputs.size())  --> GRU/LSTM/MogLSTM: torch.Size([10, 64, 500])
     # encoder_hidden[0].size())  --> GRU/LSTM: torch.Size([4, 64, 500])  || MogLSTM: torch.Size([2, 64, 500])
     # encoder_hidden[1].size())  --> GRU/LSTM: torch.Size([4, 64, 500])  || MogLSTM: torch.Size([2, 64, 500])
 
-    # ------------------------------------
-    # SETTING UP DECODER
-    # ------------------------------------
     # Create initial decoder input (start with SOS tokens for each sentence)
     decoder_input = torch.LongTensor([[SOS_token for _ in range(batch_size)]])
     decoder_input = decoder_input.to(device)
+    decoder_hidden = set_decoder_hidden(encoder_hidden)
 
-    # Set initial decoder hidden state to the encoder's final hidden state
-    if decoder.rnn._get_name() == "LSTM":
-        if not decoder.rnn.bidirectional:  # unidirectional LSTM decoder
-            decoder_hidden = [encoder_state[:decoder_n_layers] for encoder_state in encoder_hidden]
-            # decoder_hidden[0].shape = torch.Size([2, 64, 500]), decoder_hidden[1].shape = torch.Size([2, 64, 500])
-    elif decoder.rnn._get_name() == "MogLSTM":
-        decoder_hidden = encoder_hidden
-    else:  # GRU
-        if not decoder.rnn.bidirectional:  # all decoders
-            decoder_hidden = encoder_hidden[:decoder.n_layers]
+    def train():
+        nonlocal loss
+        nonlocal n_totals
+        nonlocal decoder_input
+        nonlocal decoder_hidden
 
-    # ------------------------------------
-    # TRAINING
-    # ------------------------------------
-    # Determine if we are using teacher forcing this iteration
-    use_teacher_forcing = True if random.random() < teacher_forcing_ratio else False
-    # Forward batch of sequences through decoder one time step at a time
-    if use_teacher_forcing:
+        # Zero gradients
+        encoder_optimizer.zero_grad()
+        decoder_optimizer.zero_grad()
+        # Forward batch of sequences through decoder one time step at a time
         for t in range(max_target_len):
-            decoder_output, decoder_hidden = decoder(
-                decoder_input, decoder_hidden, encoder_outputs
-            )
-            # Teacher forcing: next input is current target
-            decoder_input = target_variable[t].view(1, -1)
-            # Calculate and accumulate loss
-            mask_loss, nTotal = maskNLLLoss(decoder_output, target_variable[t], mask[t])
-            loss += mask_loss
-            print_losses.append(mask_loss.item() * nTotal)
-            n_totals += nTotal
-    else:
-        for t in range(max_target_len):
-            decoder_output, decoder_hidden = decoder(
-                decoder_input, decoder_hidden, encoder_outputs
-            )
+            decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden, encoder_outputs)
             # No teacher forcing: next input is decoder's own current output
             _, topi = decoder_output.topk(1)
             decoder_input = torch.LongTensor([[topi[i][0] for i in range(batch_size)]])
@@ -102,51 +95,66 @@ def train(input_variable, lengths, target_variable, mask, max_target_len, encode
             print_losses.append(mask_loss.item() * nTotal)
             n_totals += nTotal
 
-    # Perform backpropatation
-    loss.backward()
+        # Perform backpropatation
+        loss.backward()
+        # Clip gradients: gradients are modified in place
+        _ = nn.utils.clip_grad_norm_(encoder.parameters(), clip)
+        _ = nn.utils.clip_grad_norm_(decoder.parameters(), clip)
+        # Adjust model weights
+        encoder_optimizer.step()
+        decoder_optimizer.step()
+        return sum(print_losses) / n_totals
 
-    # Clip gradients: gradients are modified in place
-    _ = nn.utils.clip_grad_norm_(encoder.parameters(), clip)
-    _ = nn.utils.clip_grad_norm_(decoder.parameters(), clip)
+    def validate():
+        nonlocal loss
+        nonlocal n_totals
+        nonlocal decoder_input
+        nonlocal decoder_hidden
 
-    # Adjust model weights
-    encoder_optimizer.step()
-    decoder_optimizer.step()
+        # Forward batch of sequences through decoder one time step at a time
+        for t in range(max_target_len):
+            decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden, encoder_outputs)
+            # No teacher forcing: next input is decoder's own current output
+            _, topi = decoder_output.topk(1)
+            decoder_input = torch.LongTensor([[topi[i][0] for i in range(batch_size)]])
+            decoder_input = decoder_input.to(device)
+            # Calculate and accumulate loss
+            mask_loss, nTotal = maskNLLLoss(decoder_output, target_variable[t], mask[t])
+            loss += mask_loss
+            print_losses.append(mask_loss.item() * nTotal)
+            n_totals += nTotal
+        return sum(print_losses) / n_totals
 
-    return sum(print_losses) / n_totals
+    if dataset_type == "training":
+        return train()
+    elif dataset_type == "validation":
+        return validate()
 
 
-def trainIters(voc, pairs, encoder, decoder, encoder_optimizer, decoder_optimizer, embedding,
-               n_iteration, batch_size, print_every, clip):
+def trainIters(voc, pairs,
+               encoder: Union[EncoderRNN, EncoderMogLSTM], decoder: Union[LuongAttnDecoderRNN, LuongAttnDecoderMogLSTM],
+               encoder_optimizer, decoder_optimizer, epoch_num: int, batch_size: int, clip: float, dataset_type: str):
+    # Shuffle dataset ONCE before the entire training (according to DL book)
+    random.shuffle(pairs)
 
-    # Load batches for each iteration
-    training_batches = [batch2TrainData(voc, [random.choice(pairs) for _ in range(batch_size)])
-                        for _ in range(n_iteration)]
-
-    # Initializations
-    print('Initializing ...')
-    start_iteration = 1
-    print_loss = 0
-
-    # Training loop
+    batch_per_epoch = round(len(pairs) // batch_size)
+    print("Number of total pairs used for training:", len(pairs))
+    print("Number of batches used for an epoch:", batch_per_epoch)
     print("Training...")
-    for iteration in range(start_iteration, n_iteration + 1):
-        training_batch = training_batches[iteration - 1]
-        # Extract fields from batch
-        input_variable, lengths, target_variable, mask, max_target_len = training_batch
-
-        # Run a training iteration with batch
-        loss = train(input_variable, lengths, target_variable, mask, max_target_len, encoder,
-                     decoder, encoder_optimizer, decoder_optimizer, batch_size, clip)
-        print_loss += loss
-
-        # Print progress
-        if iteration % print_every == 0:
-            print_loss_avg = print_loss / print_every
-            print("Iteration: {}; Percent complete: {:.1f}%; Average loss: {:.4f}".format(iteration,
-                                                                                          iteration / n_iteration * 100,
-                                                                                          print_loss_avg))
-            print_loss = 0
+    for curr_epoch in range(epoch_num):
+        losses_curr_epoch = []
+        for curr_batch in range(1, batch_per_epoch+1):
+            training_batch = batch2TrainData(voc, [pairs[j + curr_batch * j] for j in range(batch_size)])
+            input_variable, lengths, target_variable, mask, max_target_len = training_batch
+            # Run a training iteration with batch
+            loss = run(input_variable, lengths, target_variable, mask, max_target_len, encoder,
+                         decoder, encoder_optimizer, decoder_optimizer, batch_size, clip, dataset_type)
+            losses_curr_epoch.append(loss)
+            print(
+                f"Epoch: {curr_epoch+1} Percent complete: {round(curr_batch / batch_per_epoch * 100, 1)}%"
+                f"; Average loss: {round(loss, 5)}"
+            )
+        losses_all_epochs.append(losses_curr_epoch)
 
 
 if __name__ == "__main__":
@@ -159,39 +167,43 @@ if __name__ == "__main__":
     # attn_model = 'general'
     # attn_model = 'concat'
 
+    # Choose dataset
+    dataset_type = "training"
+    # dataset_type = "validation"
+    # dataset_type = "test"
+
     # Hyperparameters
-    hidden_size = 500  # Number of dimensions of the embedding, number of features in a hidden state
-    encoder_n_layers = 2
-    decoder_n_layers = 2
-    dropout = 0.1
-    batch_size = 64
-    checkpoint_iter = 4000
+    HIDDEN_SIZE = 500  # Number of dimensions of the embedding, number of features in a hidden state
+    ENCODER_N_LAYERS = 2
+    DECODER_N_LAYERS = 2
+    DROPOUT = 0.1
+    BATCH_SIZE = 64
+
+    # Configure training/optimization
+    CLIP = 50.0
+    TEACHER_FORCING_RATIO = 1.0
+    LR = 0.0001  # Learning rate
+    DECODER_LR = 5.0
+    EPOCH_NUM = 100
+    PRINT_EVERY = 1
+    random.seed(1)  # seed can be any number
 
     print('Building encoder and decoder ...')
     # Initialize word embeddings
-    embedding = nn.Embedding(voc.num_words, hidden_size)
+    embedding = nn.Embedding(voc.num_words, HIDDEN_SIZE)
 
     # Initialize encoder & decoder models
-    # encoder = EncoderRNN(hidden_size, embedding, encoder_n_layers, dropout, gate="LSTM", bidirectional=True)
-    # decoder = LuongAttnDecoderRNN(attn_model, embedding, hidden_size,
+    # encoder = EncoderRNN(HIDDEN_SIZE, embedding, encoder_n_layers, dropout, gate="LSTM", bidirectional=True)
+    # decoder = LuongAttnDecoderRNN(attn_model, embedding, HIDDEN_SIZE,
     #                               voc.num_words, decoder_n_layers, dropout, gate="LSTM", bidirectional=False)
 
-    encoder = EncoderMogLSTM(hidden_size, embedding, encoder_n_layers, dropout, bidirectional=True)
-    decoder = LuongAttnDecoderMogLSTM(attn_model, embedding, hidden_size, voc.num_words, decoder_n_layers, dropout)
+    encoder = EncoderMogLSTM(HIDDEN_SIZE, embedding, ENCODER_N_LAYERS, DROPOUT, bidirectional=True)
+    decoder = LuongAttnDecoderMogLSTM(attn_model, embedding, HIDDEN_SIZE, voc.num_words, DECODER_N_LAYERS, DROPOUT)
 
     # Use appropriate device
     encoder = encoder.to(device)
     decoder = decoder.to(device)
     print('Models built and ready to go!')
-
-    # Configure training/optimization
-    clip = 50.0
-    teacher_forcing_ratio = 1.0
-    learning_rate = 0.0001
-    decoder_learning_ratio = 5.0
-    n_iteration = 4000
-    print_every = 1
-    save_every = 500
 
     # Ensure dropout layers are in train mode
     encoder.train()
@@ -199,8 +211,8 @@ if __name__ == "__main__":
 
     # Initialize optimizers
     print('Building optimizers ...')
-    encoder_optimizer = optim.Adam(encoder.parameters(), lr=learning_rate)
-    decoder_optimizer = optim.Adam(decoder.parameters(), lr=learning_rate * decoder_learning_ratio)
+    encoder_optimizer = optim.Adam(encoder.parameters(), lr=LR)
+    decoder_optimizer = optim.Adam(decoder.parameters(), lr=LR * DECODER_LR)
 
     # If you have cuda, configure cuda to call
     for state in encoder_optimizer.state.values():
@@ -217,5 +229,6 @@ if __name__ == "__main__":
     # Run training iterations
     # --------------------------
     print("Starting Training!")
-    trainIters(voc, pairs, encoder, decoder, encoder_optimizer, decoder_optimizer, embedding,
-               n_iteration, batch_size, print_every, clip)
+    losses_all_epochs = []
+    trainIters(voc, pairs, encoder, decoder, encoder_optimizer, decoder_optimizer,
+               EPOCH_NUM, BATCH_SIZE, CLIP, dataset_type)

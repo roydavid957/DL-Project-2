@@ -8,7 +8,9 @@ import unicodedata
 import random
 from typing import List, Tuple, Union
 
-from format_data import corpus_name, datafile_qr
+from format_data import corpus_name, \
+    datafile, datafile_train, datafile_valid, datafile_test, \
+    datafile_qr, datafile_qr_train, datafile_qr_valid, datafile_qr_test
 
 # Default word tokens
 PAD_token = 0  # Used for padding short sentences
@@ -294,7 +296,7 @@ def batch2TrainData(voc: Voc, pair_batch: List[List[str]]) -> Tuple[LongTensor, 
 
 
 # Load/Assemble voc and pairs
-voc, pairs = loadPrepareData(corpus_name, datafile_qr)
+voc, pairs = loadPrepareData(corpus_name, datafile_train)
 # Print some pairs to validate
 print("\npairs:")
 for pair in pairs[:10]:

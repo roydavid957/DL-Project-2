@@ -172,17 +172,18 @@ def printLines(file, n=10):
 
 corpus_name = "cornell movie-dialogs corpus"
 corpus = os.path.join("data", corpus_name)
+split_path = os.path.join("data", "split_data")
 
 # Define path to new files
-datafile = os.path.join(corpus, "formatted_movie_lines.txt")
-datafile_train = os.path.join(corpus, "formatted_movie_lines_train.txt")
-datafile_valid = os.path.join(corpus, "formatted_movie_lines_valid.txt")
-datafile_test = os.path.join(corpus, "formatted_movie_lines_test.txt")
+datafile = os.path.join(split_path, "formatted_movie_lines.txt")
+datafile_train = os.path.join(split_path, "formatted_movie_lines_train.txt")
+datafile_valid = os.path.join(split_path, "formatted_movie_lines_valid.txt")
+datafile_test = os.path.join(split_path, "formatted_movie_lines_test.txt")
 
-datafile_qr = os.path.join(corpus, "formatted_movie_QR_lines.txt")
-datafile_qr_train = os.path.join(corpus, "formatted_movie_QR_lines_train.txt")
-datafile_qr_valid = os.path.join(corpus, "formatted_movie_QR_lines_valid.txt")
-datafile_qr_test = os.path.join(corpus, "formatted_movie_QR_lines_test.txt")
+datafile_qr = os.path.join(split_path, "formatted_movie_QR_lines.txt")
+datafile_qr_train = os.path.join(split_path, "formatted_movie_QR_lines_train.txt")
+datafile_qr_valid = os.path.join(split_path, "formatted_movie_QR_lines_valid.txt")
+datafile_qr_test = os.path.join(split_path, "formatted_movie_QR_lines_test.txt")
 
 if __name__ == '__main__':
 
