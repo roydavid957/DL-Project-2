@@ -8,7 +8,6 @@ from typing import Union
 
 from build_vocabulary import voc, pairs, batch2TrainData, SOS_token
 from model import EncoderRNN, LuongAttnDecoderRNN
-from model_moglstm import EncoderMogLSTM, LuongAttnDecoderMogLSTM
 from serialization import save_seq2seq
 
 
@@ -129,7 +128,7 @@ def iterate_batches(input_variable, lengths, target_variable, mask, max_target_l
 
 
 def run(voc, pairs,
-        encoder: Union[EncoderRNN, EncoderMogLSTM], decoder: Union[LuongAttnDecoderRNN, LuongAttnDecoderMogLSTM],
+        encoder: EncoderRNN, decoder: LuongAttnDecoderRNN,
         encoder_optimizer, decoder_optimizer, epoch_num: int, batch_size: int, clip: float, dataset_type: str):
     # Shuffle dataset ONCE before the entire training (according to DL book)
     random.shuffle(pairs)
@@ -161,8 +160,6 @@ def run(voc, pairs,
 
 if __name__ == "__main__":
 
-
-
     USE_CUDA = torch.cuda.is_available()
     device = torch.device("cuda" if USE_CUDA else "cpu")
 
@@ -171,8 +168,8 @@ if __name__ == "__main__":
     attn_model = 'dot'
     # attn_model = 'general'
     # attn_model = 'concat'
-    encoder_name = "GRU"
-    decoder_name = "GRU"
+    encoder_name = "MogLSTM"
+    decoder_name = "MogLSTM"
 
     # Choose dataset
     dataset_type = "training"
@@ -203,9 +200,6 @@ if __name__ == "__main__":
     encoder = EncoderRNN(HIDDEN_SIZE, embedding, ENCODER_N_LAYERS, DROPOUT, gate=encoder_name, bidirectional=True)
     decoder = LuongAttnDecoderRNN(attn_model, embedding, HIDDEN_SIZE,
                                   voc.num_words, DECODER_N_LAYERS, DROPOUT, gate=decoder_name)
-
-    # encoder = EncoderMogLSTM(HIDDEN_SIZE, embedding, ENCODER_N_LAYERS, DROPOUT, bidirectional=True)
-    # decoder = LuongAttnDecoderMogLSTM(attn_model, embedding, HIDDEN_SIZE, voc.num_words, DECODER_N_LAYERS, DROPOUT)
 
     # Use appropriate device
     encoder = encoder.to(device)

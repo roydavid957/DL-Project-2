@@ -8,6 +8,138 @@ USE_CUDA = torch.cuda.is_available()
 device = torch.device("cuda" if USE_CUDA else "cpu")
 
 
+class MogLSTMCell(nn.Module):
+
+    def __init__(self, input_size, hidden_size, mogrify_steps=5):
+        super(MogLSTMCell, self).__init__()
+        self.mogrify_steps = mogrify_steps
+        self.lstm = nn.LSTMCell(input_size, hidden_size)
+        self.mogrifier_list = nn.ModuleList([nn.Linear(hidden_size, input_size)])  # start with q
+        for i in range(1, mogrify_steps):
+            if i % 2 == 0:
+                self.mogrifier_list.extend([nn.Linear(hidden_size, input_size)])  # q --> update x
+            else:
+                self.mogrifier_list.extend([nn.Linear(input_size, hidden_size)])  # r --> update h
+
+    def mogrify(self, x, h):
+        for i in range(self.mogrify_steps):
+            if (i + 1) % 2 == 0:
+                h = (2 * torch.sigmoid(self.mogrifier_list[i](x))) * h
+            else:
+                x = (2 * torch.sigmoid(self.mogrifier_list[i](h))) * x
+        return x, h
+
+    def forward(self, x, states):
+        ht, ct = states
+        x, ht, ct = [old.to(device) for old in [x, ht, ct]]
+        x, ht = self.mogrify(x, ht)
+        ht, ct = self.lstm(x, (ht, ct))
+        return ht, ct
+
+
+class MogLSTM_BiDir(nn.Module):
+    """ Bidirectional Mogrifier LSTM, can be used for Encoder only """
+
+    def __init__(self, input_size, hidden_size, dropout=0, mogrify_steps=5, cell_num=2):
+        super().__init__()
+        self.bidirectional = True
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.fwd_layers = nn.ModuleList([MogLSTMCell(input_size, hidden_size, mogrify_steps) for _ in range(cell_num)])
+        self.bwd_layers = nn.ModuleList([MogLSTMCell(input_size, hidden_size, mogrify_steps) for _ in range(cell_num)])
+        self.drop = nn.Dropout(dropout)
+
+    @staticmethod
+    def init_states(batch_size, hidden_size):
+        """ Function for creating zero-valued hidden_state & cell_state tensors list """
+        return [torch.zeros(batch_size, hidden_size),
+                torch.zeros(batch_size, hidden_size)]
+
+    def forward(self, input_seq, hidden=None):
+        """
+        :param input_seq:
+        :param hidden: Hidden state and cell state. Not used for encoder, only for decoder.
+        """
+        batch_size = input_seq.shape[1]
+        seq_len = input_seq.shape[0]
+
+        fwd_h1, fwd_c1 = self.init_states(batch_size, self.hidden_size)
+        fwd_h2, fwd_c2 = self.init_states(batch_size, self.hidden_size)
+        bwd_h1, bwd_c1 = self.init_states(batch_size, self.hidden_size)
+        bwd_h2, bwd_c2 = self.init_states(batch_size, self.hidden_size)
+
+        outputs = []
+        for step in range(seq_len):
+            fwd_x = self.drop(input_seq[step, :])
+            fwd_h1, fwd_c1 = self.fwd_layers[0](fwd_x, (fwd_h1, fwd_c1))
+            fwd_h2, fwd_c2 = self.fwd_layers[1](fwd_h1, (fwd_h2, fwd_c2))
+
+            bwd_x = self.drop(input_seq[seq_len - (step + 1), :])
+            bwd_h1, bwd_c1 = self.bwd_layers[0](bwd_x, (bwd_h1, bwd_c1))
+            bwd_h2, bwd_c2 = self.bwd_layers[1](bwd_h1, (bwd_h2, bwd_c2))
+
+            out = self.drop(torch.cat((fwd_h2, bwd_h2), dim=1))  # [(64, 500), (64, 500)] --> [(64, 1000)]
+            outputs.append(out.unsqueeze(0))  # [[1, 64, 1000], [1, 64, 1000], ..., [1, 64, 1000]]
+
+        # Same type of seshaping applied to h1, c1, h2, c2, that is: [(64, 500), (64,500)] --> [(2, 64, 500)]
+        h1, c1 = torch.cat((fwd_h1.unsqueeze(0), bwd_h1.unsqueeze(0))), torch.cat((fwd_c1.unsqueeze(0), bwd_c1.unsqueeze(0)))
+        h2, c2 = torch.cat((fwd_h2.unsqueeze(0), bwd_h2.unsqueeze(0))), torch.cat((fwd_c2.unsqueeze(0), bwd_c2.unsqueeze(0)))
+
+        # Shapes: (num_layers*directions, batch_size, input_size)
+        last_hidden = torch.cat((h1, h2))  # [(2, 64, 500)] --> [(4, 64, 500)]
+        last_cell = torch.cat((c1, c2))  # [(2, 64, 500)] --> [(4, 64, 500)]
+
+        outputs = torch.cat(outputs, dim=0)  # list of 10 tensors of (64, 1000) --> [(10, 64, 1000)]
+        # Shapes: (seq_len, batch, input_size)
+        outputs = outputs[:, :, :self.hidden_size] + outputs[:, :, self.hidden_size:] # [(10, 64, 1000)] --> [(10, 64, 500)]
+
+        return outputs, (last_hidden, last_cell)
+
+
+class MogLSTM_UniDir(nn.Module):
+    """ Unidirectional Mogrifier LSTM, can be used for both Encoder and Decoder """
+
+    def __init__(self, input_size, hidden_size, dropout=0, mogrify_steps=5, cell_num=2):
+        super().__init__()
+        self.bidirectional = False
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.layers = nn.ModuleList([MogLSTMCell(input_size, hidden_size, mogrify_steps) for _ in range(cell_num)])
+        self.drop = nn.Dropout(dropout)
+
+    def forward(self, input_seq, hidden):
+        """
+        :param input_seq:
+        :param hidden: Hidden state and cell state. Not used for encoder, only for decoder.
+        """
+        batch_size = input_seq.shape[1]
+        seq_len = input_seq.shape[0]
+
+        if hidden: # as mentioned above, only used for decoder
+            hidden_states = hidden[0]
+            cell_states = hidden[1]
+            h1, c1 = hidden_states[0], cell_states[0]
+            h2, c2 = hidden_states[1], cell_states[1]
+        else:
+            h1, c1 = MogLSTM_BiDir.init_states(batch_size, self.hidden_size)
+            h2, c2 = MogLSTM_BiDir.init_states(batch_size, self.hidden_size)
+
+        outputs = []
+        for step in range(seq_len):
+            x = self.drop(input_seq[step, :])
+            h1, c1 = self.layers[0](x, (h1, c1))
+            h2, c2 = self.layers[1](h1, (h2, c2))
+            out = self.drop(h2)
+            outputs.append(out.unsqueeze(0))
+
+        # Shapes: (seq_len, batch, input_size)
+        last_hidden = torch.cat((h1.unsqueeze(0), h2.unsqueeze(0)))  # torch.Size([2, 64, 500])
+        last_cell = torch.cat((c1.unsqueeze(0), c2.unsqueeze(0)))  # torch.Size([2, 64, 500])
+        outputs = torch.cat(outputs, dim=0)  # torch.Size([10, 64, 500])
+
+        return outputs, (last_hidden, last_cell)
+
+
 class EncoderRNN(nn.Module):
     def __init__(self, hidden_size, embedding, n_layers, dropout, gate=None, bidirectional=False):
         super(EncoderRNN, self).__init__()
@@ -15,18 +147,23 @@ class EncoderRNN(nn.Module):
         self.hidden_size = hidden_size
         self.embedding = embedding
         self.bidirectional = bidirectional
+        self.gate = gate
 
-        # - Initialize GRU/LSTM; the input_size and hidden_size params are both set to 'hidden_size'
-        #   because our input size is a word embedding with number of features == hidden_size
-        # - dropout is set to 0 only in case of 1 hidden layer (according to PyTorch docs at least 2 are needed)
-        if gate == "GRU":
+        # - dropout is set to 0 only in case of 1 hidden layer
+        # (according to PyTorch docs at least 2 layers are needed)
+        if self.gate == "GRU":
             self.rnn = nn.GRU(hidden_size, hidden_size, n_layers,
                               dropout=(0 if n_layers == 1 else dropout), bidirectional=self.bidirectional)
-        elif gate == "LSTM":
+        elif self.gate == "LSTM":
             self.rnn = nn.LSTM(hidden_size, hidden_size, n_layers,
                                dropout=(0 if n_layers == 1 else dropout), bidirectional=self.bidirectional)
+        elif self.gate == "MogLSTM":
+            if self.bidirectional:
+                self.rnn = MogLSTM_BiDir(hidden_size, hidden_size, dropout=dropout)
+            else:
+                self.rnn = MogLSTM_UniDir(hidden_size, hidden_size, dropout=dropout)
         else:
-            raise ValueError("The gated RNN's type has not been given."
+            raise ValueError("The gated Encoder RNN's type has not been given."
                              "Possible options are: 'GRU', 'LSTM'.")
 
     def forward(self, input_seq, input_lengths, hidden=None):
@@ -41,7 +178,11 @@ class EncoderRNN(nn.Module):
         packed = nn.utils.rnn.pack_padded_sequence(embedded, input_lengths)
 
         # Forward pass through the network
-        if self.rnn._get_name() == "LSTM":
+        if self.gate == "MogLSTM":
+            outputs, (hidden, cell_state) = self.rnn(embedded, hidden)
+            hidden = (hidden, cell_state)
+            return outputs, hidden
+        elif self.gate == "LSTM":
             outputs, (hidden, cell_state) = self.rnn(packed, hidden)
             hidden = (hidden, cell_state)
         else:
@@ -97,14 +238,14 @@ class Attn(nn.Module):
 
 
 class LuongAttnDecoderRNN(nn.Module):
-    def __init__(self, attn_model, embedding, hidden_size, output_size,
+    def __init__(self, attn_model, embedding, hidden_size, vocab_size,
                  n_layers, dropout, gate=None):
         super(LuongAttnDecoderRNN, self).__init__()
 
         # Keep for reference
         self.attn_model = attn_model
         self.hidden_size = hidden_size
-        self.output_size = output_size
+        self.vocab_size = vocab_size
         self.n_layers = n_layers
         self.dropout = dropout
         self.gate = gate
@@ -117,12 +258,14 @@ class LuongAttnDecoderRNN(nn.Module):
             self.rnn = nn.GRU(hidden_size, hidden_size, n_layers, dropout=(0 if n_layers == 1 else dropout))
         elif self.gate == "LSTM":
             self.rnn = nn.LSTM(hidden_size, hidden_size, n_layers, dropout=(0 if n_layers == 1 else dropout))
+        elif self.gate == "MogLSTM":
+            self.rnn = MogLSTM_UniDir(hidden_size, hidden_size, dropout=dropout)
         else:
-            raise ValueError("The gated RNN's type has not been given."
-                             "Possible options are: 'GRU', 'LSTM'.")
+            raise ValueError("The gated Decoder RNN's type has not been given."
+                             "Possible options are: 'GRU', 'LSTM', 'MogLSTM'.")
 
         self.concat = nn.Linear(hidden_size * 2, hidden_size)
-        self.out = nn.Linear(hidden_size, output_size)
+        self.out = nn.Linear(hidden_size, vocab_size)
         self.attn = Attn(attn_model, hidden_size)
 
     def forward(self, input_step, last_hidden, encoder_outputs):
