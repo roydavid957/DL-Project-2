@@ -14,19 +14,20 @@ class EncoderRNN(nn.Module):
         self.n_layers = n_layers
         self.hidden_size = hidden_size
         self.embedding = embedding
+        self.bidirectional = bidirectional
 
         # - Initialize GRU/LSTM; the input_size and hidden_size params are both set to 'hidden_size'
         #   because our input size is a word embedding with number of features == hidden_size
         # - dropout is set to 0 only in case of 1 hidden layer (according to PyTorch docs at least 2 are needed)
         if gate == "GRU":
             self.rnn = nn.GRU(hidden_size, hidden_size, n_layers,
-                              dropout=(0 if n_layers == 1 else dropout), bidirectional=bidirectional)
+                              dropout=(0 if n_layers == 1 else dropout), bidirectional=self.bidirectional)
         elif gate == "LSTM":
             self.rnn = nn.LSTM(hidden_size, hidden_size, n_layers,
-                               dropout=(0 if n_layers == 1 else dropout), bidirectional=bidirectional)
+                               dropout=(0 if n_layers == 1 else dropout), bidirectional=self.bidirectional)
         else:
             raise ValueError("The gated RNN's type has not been given."
-                             "Possible options are: 'GRU', 'LSTM', 'MogLSTM'.")
+                             "Possible options are: 'GRU', 'LSTM'.")
 
     def forward(self, input_seq, input_lengths, hidden=None):
         """
@@ -97,7 +98,7 @@ class Attn(nn.Module):
 
 class LuongAttnDecoderRNN(nn.Module):
     def __init__(self, attn_model, embedding, hidden_size, output_size,
-                 n_layers, dropout, gate=None, bidirectional=False):
+                 n_layers, dropout, gate=None):
         super(LuongAttnDecoderRNN, self).__init__()
 
         # Keep for reference
@@ -113,14 +114,12 @@ class LuongAttnDecoderRNN(nn.Module):
         self.embedding_dropout = nn.Dropout(dropout)
 
         if self.gate == "GRU":
-            self.rnn = nn.GRU(hidden_size, hidden_size, n_layers,
-                              dropout=(0 if n_layers == 1 else dropout), bidirectional=bidirectional)
+            self.rnn = nn.GRU(hidden_size, hidden_size, n_layers, dropout=(0 if n_layers == 1 else dropout))
         elif self.gate == "LSTM":
-            self.rnn = nn.LSTM(hidden_size, hidden_size, n_layers,
-                               dropout=(0 if n_layers == 1 else dropout), bidirectional=bidirectional)
+            self.rnn = nn.LSTM(hidden_size, hidden_size, n_layers, dropout=(0 if n_layers == 1 else dropout))
         else:
             raise ValueError("The gated RNN's type has not been given."
-                             "Possible options are: 'GRU', 'LSTM', 'MogLSTM'.")
+                             "Possible options are: 'GRU', 'LSTM'.")
 
         self.concat = nn.Linear(hidden_size * 2, hidden_size)
         self.out = nn.Linear(hidden_size, output_size)

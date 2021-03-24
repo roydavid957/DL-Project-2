@@ -160,7 +160,7 @@ def loadPrepareData(corpus_name: str, datafile: str) -> Tuple[Voc, List[List[str
     for pair in pairs:
         voc.addSentence(pair[0])
         voc.addSentence(pair[1])
-    print("Counted words:", voc.num_words)
+    print("Counted words (before trimming the vocabulary):", voc.num_words)
     return voc, pairs
 
 
@@ -196,8 +196,10 @@ def trimRareWords(voc: Voc, pairs: List[List[str]], MIN_COUNT:int) -> List[List[
         if keep_input and keep_output:
             keep_pairs.append(pair)
 
-    print("Trimmed from {} pairs to {}, {:.4f} of total".format(len(pairs), len(keep_pairs),
+    print("Removing pairs that contain sentence in either query or reply with words encountered <= than MIN_COUNT...\n"
+          "Trimmed from {} pairs to {}, {:.4f} of total".format(len(pairs), len(keep_pairs),
                                                                 len(keep_pairs) / len(pairs)))
+    print("")
     return keep_pairs
 
 

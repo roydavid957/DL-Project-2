@@ -1,7 +1,10 @@
 .idea/
 desktop.ini
+**/desktop.ini
 data
 Training_outputs
+RNN_models
+RNN_models/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

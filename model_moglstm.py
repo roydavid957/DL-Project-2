@@ -147,7 +147,8 @@ class EncoderMogLSTM(nn.Module):
         self.n_layers = n_layers
         self.hidden_size = hidden_size
         self.embedding = embedding
-        if bidirectional:
+        self.bidirectional = bidirectional
+        if self.bidirectional:
             self.rnn = MogLSTM_BiDir(hidden_size, hidden_size, dropout=dropout)
         else:
             self.rnn = MogLSTM_UniDir(hidden_size, hidden_size, dropout=dropout)
