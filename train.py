@@ -4,9 +4,11 @@ import torch.optim as optim
 import random
 import sys
 import os
+import argparse
 from typing import Union
 
-from build_vocabulary import voc, pairs, batch2TrainData, SOS_token
+from format_data import datafiles
+from build_vocabulary import loadPrepareData, trimRareWords, batch2TrainData, SOS_token, MIN_COUNT
 from model import EncoderRNN, LuongAttnDecoderRNN
 from serialization import save_seq2seq
 
@@ -65,7 +67,7 @@ def iterate_batches(input_variable, lengths, target_variable, mask, max_target_l
         decoder_hidden = tuple([encoder_state[:decoder.n_layers] for encoder_state in encoder_hidden])
         # decoder_hidden[0].shape = torch.Size([2, 64, 500]), decoder_hidden[1].shape = torch.Size([2, 64, 500])
     elif name == "MogLSTM":
-        decoder_hidden = encoder_hidden
+        decoder_hidden = encoder_hidden  # tensors are the same dim as for LSTM, but the logic is handled elsewhere
     else:  # GRU
         decoder_hidden = encoder_hidden[:decoder.n_layers]
 
@@ -96,6 +98,9 @@ def iterate_batches(input_variable, lengths, target_variable, mask, max_target_l
 
     def exec_train():  # renamed from train() to exec_train() to avoid collision with PyTorch's train()
         """ Training function used to learn the parameters of the model(s). """
+        # Ensure dropout layers are in train mode
+        encoder.train()
+        decoder.train()
         # Zero gradients
         encoder_optimizer.zero_grad()
         decoder_optimizer.zero_grad()
@@ -115,28 +120,29 @@ def iterate_batches(input_variable, lengths, target_variable, mask, max_target_l
     def estim_gen_error():
         """ Function for estimating generalization error either on the validation or on the test set,
          thus both the hyperparameter choices and the reported generalization errors are obtained from here. """
+        encoder.eval()
+        decoder.eval()
         # Forward batch of sequences through decoder one time step at a time
         for step in range(max_target_len):
             forward_decoder(step)
         return sum(print_losses) / n_totals
     # ------------------------------------------------------------------------------------------------------------------
 
-    if dataset_type == "training":
+    if dataset_type == "train":
         return exec_train()
-    elif dataset_type in ["validation", "test"]:
+    elif dataset_type in ["val", "test"]:
         return estim_gen_error()
 
 
 def run(voc, pairs,
         encoder: EncoderRNN, decoder: LuongAttnDecoderRNN,
         encoder_optimizer, decoder_optimizer, epoch_num: int, batch_size: int, clip: float, dataset_type: str):
-    # Shuffle dataset ONCE before the entire training (according to DL book)
-    random.shuffle(pairs)
 
     batch_per_epoch = round(len(pairs) // batch_size)
     print("Number of total pairs used for training:", len(pairs))
     print("Number of batches used for an epoch:", batch_per_epoch)
     print("Training...")
+    losses_all_epochs = []
     for curr_epoch in range(epoch_num):
 
         # TODO: ADD EARLY STOPPING
@@ -147,7 +153,7 @@ def run(voc, pairs,
         for curr_batch in range(1, batch_per_epoch + 1):
             training_batch = batch2TrainData(voc, [pairs[j + curr_batch * j] for j in range(batch_size)])
             input_variable, lengths, target_variable, mask, max_target_len = training_batch
-            # Run a training iteration with batch
+            # Run a training + validation iteration with batch
             loss = iterate_batches(input_variable, lengths, target_variable, mask, max_target_len, encoder,
                                    decoder, encoder_optimizer, decoder_optimizer, batch_size, clip, dataset_type)
             losses_curr_epoch.append(loss)
@@ -156,90 +162,8 @@ def run(voc, pairs,
                 f"; Average loss: {round(loss, 5)}"
             )
         losses_all_epochs.append(losses_curr_epoch)
+    return losses_all_epochs
 
 
-if __name__ == "__main__":
-
-    USE_CUDA = torch.cuda.is_available()
-    device = torch.device("cuda" if USE_CUDA else "cpu")
-
-    # Configure models
-    model_name = 'cb_model'
-    attn_model = 'dot'
-    # attn_model = 'general'
-    # attn_model = 'concat'
-    encoder_name = "MogLSTM"
-    decoder_name = "MogLSTM"
-
-    # Choose dataset
-    dataset_type = "training"
-    # dataset_type = "validation"
-    # dataset_type = "test"
-
-    # Hyperparameters
-    HIDDEN_SIZE = 500  # Number of dimensions of the embedding, number of features in a hidden state
-    ENCODER_N_LAYERS = 2
-    DECODER_N_LAYERS = 2
-    DROPOUT = 0.1
-    BATCH_SIZE = 64
-
-    # Configure training/optimization
-    CLIP = 50.0
-    TEACHER_FORCING_RATIO = 1.0
-    LR = 0.0001  # Learning rate
-    DECODER_LR = 5.0
-    EPOCH_NUM = 100
-    PRINT_EVERY = 1
-    random.seed(1)  # seed can be any number
-
-    print('Building encoder and decoder ...')
-    # Initialize word embeddings
-    embedding = nn.Embedding(voc.num_words, HIDDEN_SIZE)
-
-    # Initialize encoder & decoder models
-    encoder = EncoderRNN(HIDDEN_SIZE, embedding, ENCODER_N_LAYERS, DROPOUT, gate=encoder_name, bidirectional=True)
-    decoder = LuongAttnDecoderRNN(attn_model, embedding, HIDDEN_SIZE,
-                                  voc.num_words, DECODER_N_LAYERS, DROPOUT, gate=decoder_name)
-
-    # Use appropriate device
-    encoder = encoder.to(device)
-    decoder = decoder.to(device)
-    print('Models built and ready to go!')
-
-    # Initialize optimizers
-    print('Building optimizers ...')
-    encoder_optimizer = optim.Adam(encoder.parameters(), lr=LR)
-    decoder_optimizer = optim.Adam(decoder.parameters(), lr=LR * DECODER_LR)
-
-    # If you have cuda, configure cuda to call
-    for state in encoder_optimizer.state.values():
-        for k, v in state.items():
-            if isinstance(v, torch.Tensor):
-                state[k] = v.cuda()
-
-    for state in decoder_optimizer.state.values():
-        for k, v in state.items():
-            if isinstance(v, torch.Tensor):
-                state[k] = v.cuda()
-
-    # --------------------------
-    # Run training iterations
-    # --------------------------
-    print("Starting Training!")
-    losses_all_epochs = []
-    # Ensure dropout layers are in train mode
-    encoder.train()
-    decoder.train()
-    run(voc, pairs, encoder, decoder, encoder_optimizer, decoder_optimizer,
-               EPOCH_NUM, BATCH_SIZE, CLIP, dataset_type)
-    avg_losses_all_epochs = [sum(epoch)/len(epoch) for epoch in losses_all_epochs]
-
-    # Save models, write results into txt
-    save_seq2seq(encoder, decoder, encoder_name, decoder_name, encoder_optimizer, decoder_optimizer)
-    os.makedirs("txt_results", exist_ok=True)
-    with open(f"txt_results{os.path.sep}"
-              f"{encoder_name}_{'Bi' if encoder.bidirectional else 'Uni'} - {decoder_name}.txt", "w") as output_file:
-        for avg_epoch_loss in avg_losses_all_epochs:
-            output_file.write(f"{str(round(avg_epoch_loss, 5))}\n")
-
-
+USE_CUDA = torch.cuda.is_available()
+device = torch.device("cuda" if USE_CUDA else "cpu")

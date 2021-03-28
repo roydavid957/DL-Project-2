@@ -8,9 +8,7 @@ import unicodedata
 import random
 from typing import List, Tuple, Union
 
-from format_data import corpus_name, \
-    datafile, datafile_train, datafile_valid, datafile_test, \
-    datafile_qr, datafile_qr_train, datafile_qr_valid, datafile_qr_test
+from format_data import datafiles
 
 # Default word tokens
 PAD_token = 0  # Used for padding short sentences
@@ -27,8 +25,7 @@ class Voc:
         - Keeps track of count of each word, and total word count.
     """
 
-    def __init__(self, name):
-        self.name = name
+    def __init__(self):
         self.trimmed = False
         self.word2index = {}
         self.word2count = {}  # number of times the word has occurred in the dataset
@@ -125,7 +122,7 @@ def filterPairs(pairs: List[List[str]]) -> List[List[str]]:
 
 
 # Symbol Pre-processing step 1
-def readVocs(datafile: str, corpus_name: str) -> Tuple[Voc, List[List[str]]]:
+def readVocs(datafile: str) -> Tuple[Voc, List[List[str]]]:
     """
     Read query/response pairs and return an empty Voc object with the pairs for loadPrepareData()\n
     :param datafile: Txt file containing the conversations, e.g. "formatted_movie_lines.txt".
@@ -133,26 +130,28 @@ def readVocs(datafile: str, corpus_name: str) -> Tuple[Voc, List[List[str]]]:
     :return: Empty Voc object and normalized list of query-reply sentence pairs
             - Example pair from pairs: ['you d go with him !', 'don t kid yourself you know how i stand back there .']
     """
+    print("*"*40)
+    print(f"[DATASET IN USE]: {os.path.basename(datafile)}")
+    print("*" * 40)
     print("Reading lines...")
     # Read the file and split into lines
     lines = open(datafile, encoding='utf-8'). \
         read().strip().split('\n')
     # Split every line into pairs and normalize
     pairs = [[normalizeString(s) for s in l.split('\t')] for l in lines]
-    voc = Voc(corpus_name)
+    voc = Voc()
     return voc, pairs
 
 
 # Symbol Pre-processing step 2
-def loadPrepareData(corpus_name: str, datafile: str) -> Tuple[Voc, List[List[str]]]:
+def loadPrepareData(datafile: str) -> Tuple[Voc, List[List[str]]]:
     """
     Using readVocs(), return a populated voc object and a query-reply pairs list of lists.
     :param corpus_name: Name of the Voc object.
     :param datafile: Path to formatted dataset.
     :return: Voc object and the dataset (pairs) before the last (trimming) symbol pre-processing step.
     """
-    print("Start preparing training data ...")
-    voc, pairs = readVocs(datafile, corpus_name)
+    voc, pairs = readVocs(datafile)
     print("Read {!s} sentence pairs".format(len(pairs)))
     pairs = filterPairs(pairs)
     print("Trimmed to {!s} sentence pairs".format(len(pairs)))
@@ -196,10 +195,9 @@ def trimRareWords(voc: Voc, pairs: List[List[str]], MIN_COUNT:int) -> List[List[
         if keep_input and keep_output:
             keep_pairs.append(pair)
 
-    print("Removing pairs that contain sentence in either query or reply with words encountered <= than MIN_COUNT...\n"
-          "Trimmed from {} pairs to {}, {:.4f} of total".format(len(pairs), len(keep_pairs),
+    print("\nRemoving pairs that contain sentence in either query or reply with words encountered <= than MIN_COUNT...\n"
+          "trimmed from {} pairs to {}, {:.4f} of total\n".format(len(pairs), len(keep_pairs),
                                                                 len(keep_pairs) / len(pairs)))
-    print("")
     return keep_pairs
 
 
@@ -296,17 +294,18 @@ def batch2TrainData(voc: Voc, pair_batch: List[List[str]]) -> Tuple[LongTensor, 
 
     return inp, lengths, output, mask, max_target_len
 
-
-# Load/Assemble voc and pairs
-voc, pairs = loadPrepareData(corpus_name, datafile_train)
 # Print some pairs to validate
-print("\npairs:")
-for pair in pairs[:10]:
-    print(pair)
-# Trim voc and pairs
-pairs = trimRareWords(voc, pairs, MIN_COUNT)
+# print("\npairs:")
+# for pair in pairs[:10]:
+#     print(pair)
+
 
 if __name__ == '__main__':
+    # Load/Assemble voc and pairs
+    voc, pairs = loadPrepareData(datafiles["train"])
+    # Trim voc and pairs
+    pairs = trimRareWords(voc, pairs, MIN_COUNT)
+
     # Example for validation
     small_batch_size = 5
     batches = batch2TrainData(voc, [random.choice(pairs) for _ in range(small_batch_size)])

@@ -2,6 +2,7 @@
 
 import matplotlib.pyplot as plt
 
+
 # TODO
 def plot_avg_epoch_losses(losses: list, seq2seq_model: str, dataset: str):
     """ Plotting function for X number of epochs,

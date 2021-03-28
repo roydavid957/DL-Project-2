@@ -164,7 +164,7 @@ class EncoderRNN(nn.Module):
                 self.rnn = MogLSTM_UniDir(hidden_size, hidden_size, dropout=dropout)
         else:
             raise ValueError("The gated Encoder RNN's type has not been given."
-                             "Possible options are: 'GRU', 'LSTM'.")
+                             "Possible options are: 'GRU', 'LSTM', 'MogLSTM.")
 
     def forward(self, input_seq, input_lengths, hidden=None):
         """
