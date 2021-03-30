@@ -47,12 +47,28 @@ for i, line in enumerate(valid_lines):
     new_line = re.sub(r"[Â]", r"", new_line)
     valid_lines[i] = new_line
 
-# Truncate the model because it cannot handle more than 1024 tokens
-for i in range(len(train_lines)):
-    line = train_lines[i]
-    if len(line) > 1024:
-        line = line[:1024]
-        train_lines[i] = line
+# Trims down lines with over 800 words to less than 800 words
+for i, line in enumerate(train_lines):
+    count = 0
+    for sentence in line.split("."):
+        for word in sentence.split(" "):
+            count += 1
+    if count > 800:
+        new_sentence = ""
+        count = 0
+        for sentence in line.split("."):
+            for word in sentence.split(" "):
+                count += 1
+            if count < 800:
+                new_sentence += f"{sentence}."
+            else:
+                break
+        train_lines[i] = new_sentence
+
+# Remove double hyphens because they increase token size arbitrarily
+for i, line in enumerate(train_lines):
+    new_line = re.sub(r"--", r" ", line)
+    train_lines[i] = new_line
 
 # Instantiate the tokenizer
 tokenizer = GPT2Tokenizer.from_pretrained(
