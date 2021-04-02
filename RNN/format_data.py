@@ -89,7 +89,7 @@ def extract_and_split_sentence_pairs(conversations: List[dict]) -> Tuple[List[li
                 if count < int(utterances * 0.6):
                     train_qa_pairs.append(pair)
                 elif int(utterances * 0.6) < count < int(utterances * 0.8):
-                    val_qa_pairs.append(pair)
+                    train_qa_pairs.append(pair)
                 else:
                     test_qa_pairs.append(pair)
                 count += 2
@@ -130,7 +130,7 @@ def extract_and_split_conversation_lines(conversations: List[dict]) -> Tuple[lis
             if count < int(utterances*0.6):
                 train_lines.append(line)
             elif int(utterances*0.6) < count < int(utterances*0.8):
-                val_lines.append(line)
+                train_lines.append(line)
             else:
                 test_lines.append(line)
             count += 1
@@ -172,7 +172,7 @@ def printLines(file, n=10):
 
 corpus_name = "cornell movie-dialogs corpus"
 corpus = os.path.join("data", corpus_name)
-split_path = os.path.join("data", "split_data")
+split_path = os.path.join("data", "train_test_split")
 
 # Define path to new files
 datafiles = {

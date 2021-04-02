@@ -2,14 +2,14 @@ import argparse
 import random
 import os
 import pprint
-
 import torch
 from torch import nn
 from torch import optim
 from pathos.multiprocessing import ProcessingPool as Pool
+from nltk.translate.bleu_score import sentence_bleu
 
 from format_data import datafiles
-from build_vocabulary import trimRareWords, loadPrepareData, MIN_COUNT, Voc
+from build_vocabulary import trimRareWords, loadPrepareData, MIN_COUNT
 from train import run
 from model import EncoderRNN, LuongAttnDecoderRNN
 from serialization import save_seq2seq, load_encoder, load_decoder, load_voc, load_embedding, \
@@ -31,7 +31,7 @@ def main():
     if run_mode == 'train':
         phase = {
             "train": {},
-            "val": {}
+            "val": {},
         }
         # Load/Assemble voc and pairs
         phase["train"]["voc"], phase["train"]["pairs"] = loadPrepareData(datafiles["train"])
@@ -39,6 +39,8 @@ def main():
         # Trim voc and pairs
         phase["train"]["pairs"] = trimRareWords(phase["train"]["voc"], phase["train"]["pairs"], MIN_COUNT)
         phase["val"]["pairs"] = trimRareWords(phase["val"]["voc"], phase["val"]["pairs"], MIN_COUNT)
+        voc_size = phase["train"]["voc"].num_words + phase["val"]["voc"].num_words
+        print("Combined vocabulary size:", voc_size)
 
         # Shuffle both sets ONCE before the entire training
         random.seed(1)  # seed can be any number
@@ -47,17 +49,19 @@ def main():
 
         print('Building training set encoder and decoder ...')
         # Initialize word embeddings for both encoder and decoder
-        embedding = nn.Embedding(phase["train"]["voc"].num_words, HIDDEN_SIZE).to(device)
+        embedding = nn.Embedding(voc_size, HIDDEN_SIZE).to(device)
 
         # Initialize encoder & decoder models
         encoder = EncoderRNN(HIDDEN_SIZE, embedding, ENCODER_N_LAYERS, DROPOUT, gate=encoder_name,
                              bidirectional=BIDIRECTION)
         decoder = LuongAttnDecoderRNN(attn_model, embedding, HIDDEN_SIZE,
-                                      phase["train"]["voc"].num_words, DECODER_N_LAYERS, DROPOUT, gate=decoder_name)
+                                      voc_size, DECODER_N_LAYERS, DROPOUT, gate=decoder_name)
+        searcher = GreedySearchDecoder(encoder, decoder)
 
         # Use appropriate device
         encoder = encoder.to(device)
         decoder = decoder.to(device)
+        # searcher.to(device)
         print('Models built and ready to go!')
 
         # Initialize optimizers
@@ -77,6 +81,10 @@ def main():
                 for k, v in state.items():
                     if isinstance(v, torch.Tensor):
                         state[k] = v.cuda()
+
+        print("*"*40)
+        print(f"Device settings:", device)
+        print("*" * 40)
 
         print("Starting Training!")
         run(encoder, decoder, encoder_optimizer, decoder_optimizer, EPOCH_NUM, BATCH_SIZE, CLIP, phase)
@@ -139,7 +147,7 @@ parser.add_argument('-ES', '--early_stopping', help="Whether to use early stoppi
 parser.add_argument('-d', '--dropout', help="Value of dropout, can be any float",
                     type=float, default=0.1)
 parser.add_argument('-gc', '--gradient_clipping', help='Value of gradient clipping',
-                    type=int, default=50)
+                    type=float, default=50.0)
 parser.add_argument('-lr', '--lr',
                     help="Learning rate of optimization algorithms",
                     type=float, default=0.0001)
@@ -172,7 +180,7 @@ device = torch.device("cuda" if USE_CUDA else "cpu")
 attn_model = 'dot'
 
 # Base params
-HIDDEN_SIZE = 500  # Number of dimensions of the embedding; number of features in a hidden state
+HIDDEN_SIZE = 300  # Number of dimensions of the embedding; number of features in a hidden state
 ENCODER_N_LAYERS = 2
 DECODER_N_LAYERS = 2
 BATCH_SIZE = 64

@@ -6,13 +6,11 @@ from typing import List
 
 
 def read_data(path):
-    os.chdir("txt_results")
     file = os.path.abspath(f".\\{path}")
     model_name = os.path.basename(file).split("_")[1]
     with open(file, "r") as file_obj:
         data = file_obj.readlines()
     data = [float(data.split("\n")[0]) for data in data]
-    os.chdir("..")
     return model_name, data
 
 
@@ -38,6 +36,7 @@ def read_and_plot(train_path, val_path, file_ext):
     _, val_data = read_data(val_path)
     plot_avg_epoch_losses([train_data, val_data], model_name, file_ext)
 
+os.chdir("txt_results\\Exp set - joint voc, hidden 300")
 
 # -------------------------------------------------- GRU --------------------------------------------------
 # ------- Gradient clipping -------
@@ -82,17 +81,17 @@ read_and_plot("train_LSTM2LSTM_d0.1_gc1.0_lr0.0001.txt",
               "gc2.0")
 
 # ------- DROPOUT -------
-read_and_plot("train_LSTM2LSTM_d0.1_gc50.0_lr0.0001.txt",
-              "val_LSTM2LSTM_d0.1_gc50.0_lr0.0001.txt",
-              "d0.1")
-
-read_and_plot("train_LSTM2LSTM_d0.2_gc50.0_lr0.0001.txt",
-              "val_LSTM2LSTM_d0.2_gc50.0_lr0.0001.txt",
-              "d0.2")
-
-read_and_plot("train_LSTM2LSTM_d0.3_gc50.0_lr0.0001.txt",
-              "val_LSTM2LSTM_d0.3_gc50.0_lr0.0001.txt",
-              "d0.3")
+# read_and_plot("train_LSTM2LSTM_d0.1_gc50.0_lr0.0001.txt",
+#               "val_LSTM2LSTM_d0.1_gc50.0_lr0.0001.txt",
+#               "d0.1")
+#
+# read_and_plot("train_LSTM2LSTM_d0.2_gc50.0_lr0.0001.txt",
+#               "val_LSTM2LSTM_d0.2_gc50.0_lr0.0001.txt",
+#               "d0.2")
+#
+# read_and_plot("train_LSTM2LSTM_d0.3_gc50.0_lr0.0001.txt",
+#               "val_LSTM2LSTM_d0.3_gc50.0_lr0.0001.txt",
+#               "d0.3")
 
 # ------- Learning rate -------
 read_and_plot("train_LSTM2LSTM_d0.1_gc50.0_lr0.0001.txt",

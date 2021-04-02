@@ -7,10 +7,9 @@ import os
 import argparse
 from typing import Union, Dict
 
-from format_data import datafiles
-from build_vocabulary import loadPrepareData, trimRareWords, batch2TrainData, SOS_token, MIN_COUNT
+from build_vocabulary import batch2TrainData, SOS_token, MAX_LENGTH
 from model import EncoderRNN, LuongAttnDecoderRNN
-from serialization import save_seq2seq
+from chat import GreedySearchDecoder
 
 
 def maskNLLLoss(inp, target, mask):
@@ -30,7 +29,7 @@ def maskNLLLoss(inp, target, mask):
 
 
 def iterate_batches(input_variable, lengths, target_variable, mask, max_target_len, encoder, decoder,
-                    encoder_optimizer, decoder_optimizer, batch_size, clip, phase, phase_name):
+                    encoder_optimizer, decoder_optimizer, batch_size, clip, phase_name):
     """ Wrapper function of forward_decoder(), train() and estim_gen_error() for iterating over batches """
 
     # Set device options
@@ -76,6 +75,9 @@ def iterate_batches(input_variable, lengths, target_variable, mask, max_target_l
     elif name == "GRU" and not isinstance(decoder_hidden, torch.Tensor):
         raise ValueError("'decoder_hidden' was supposed to be assigned a 'torch.Tensor', assignment has failed.")
 
+    # Initialize tensors to append decoded words to
+    all_tokens = torch.zeros([0], device=device, dtype=torch.long)
+
     # Nested functions that manipulate variables of run()
     # ------------------------------------------------------------------------------------------------------------------
     def forward_decoder(step: int):
@@ -84,8 +86,16 @@ def iterate_batches(input_variable, lengths, target_variable, mask, max_target_l
         nonlocal n_totals
         nonlocal decoder_input
         nonlocal decoder_hidden
+        nonlocal all_tokens
 
         decoder_output, decoder_hidden = decoder(decoder_input, decoder_hidden, encoder_outputs)
+
+        # ---- BLEU data ----
+        # Obtain most likely word token
+        _, token = torch.max(decoder_output, dim=1)
+        all_tokens = torch.cat((all_tokens, token), dim=0)
+
+        # ---- Cross-Entropy data ----
         # No teacher forcing: next input is decoder's own current output
         _, topi = decoder_output.topk(1)
         decoder_input = torch.LongTensor([[topi[i][0] for i in range(batch_size)]])
@@ -113,7 +123,6 @@ def iterate_batches(input_variable, lengths, target_variable, mask, max_target_l
         # Adjust model weights
         encoder_optimizer.step()
         decoder_optimizer.step()
-        return sum(print_losses) / n_totals
 
     def estim_gen_error():
         """ Function for estimating generalization error either on the validation or on the test set,
@@ -121,16 +130,17 @@ def iterate_batches(input_variable, lengths, target_variable, mask, max_target_l
         # Forward batch of sequences through decoder one time step at a time
         for step in range(max_target_len):
             forward_decoder(step)
-        return sum(print_losses) / n_totals
+
     # ------------------------------------------------------------------------------------------------------------------
-
     if phase_name == "train":
-        return exec_train()
+        exec_train()
     elif phase_name in ["val", "test"]:
-        return estim_gen_error()
+        estim_gen_error()
+
+    return sum(print_losses) / n_totals, all_tokens
 
 
-def run(encoder: EncoderRNN, decoder: LuongAttnDecoderRNN,
+def run(voc, encoder: EncoderRNN, decoder: LuongAttnDecoderRNN,
         encoder_optimizer, decoder_optimizer, epoch_num: int, batch_size: int, clip: float, phase: Dict[str, dict]):
 
     def run_phase(curr_phase, phase_name):
@@ -140,9 +150,14 @@ def run(encoder: EncoderRNN, decoder: LuongAttnDecoderRNN,
                                              [curr_phase["pairs"][j + curr_batch * j] for j in range(batch_size)])
             input_variable, lengths, target_variable, mask, max_target_len = training_batch
             # Run a TRAINING iteration with batch
-            loss = iterate_batches(input_variable, lengths, target_variable, mask, max_target_len, encoder,
-                                   decoder, encoder_optimizer, decoder_optimizer, batch_size, clip, phase, phase_name)
+            loss, all_tokens = iterate_batches(input_variable, lengths, target_variable, mask, max_target_len, encoder,
+                                   decoder, encoder_optimizer, decoder_optimizer, batch_size, clip, phase_name)
             losses_curr_epoch.append(loss)
+
+            # indexes -> words
+            decoded_words = [voc.index2word[token.item()] for token in all_tokens]
+
+
             print(
                 f"[{phase_name.upper()}]"
                 f" Epoch: {curr_epoch + 1}"

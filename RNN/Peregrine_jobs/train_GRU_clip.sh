@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --time=03:00:00
+#SBATCH --time=01:00:00
 #SBATCH --nodes=1
 #SBATCH --job-name=GRU_gc
 #SBATCH --mem=4000

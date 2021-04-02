@@ -146,10 +146,9 @@ def readVocs(datafile: str) -> Tuple[Voc, List[List[str]]]:
 # Symbol Pre-processing step 2
 def loadPrepareData(datafile: str) -> Tuple[Voc, List[List[str]]]:
     """
-    Using readVocs(), return a populated voc object and a query-reply pairs list of lists.
-    :param corpus_name: Name of the Voc object.
+    Using readVocs() return a populated voc object and a query-reply pairs list of lists.
     :param datafile: Path to formatted dataset.
-    :return: Voc object and the dataset (pairs) before the last (trimming) symbol pre-processing step.
+    :return: Voc object and the dataset (pairs) before the last pre-processing (trimming) step.
     """
     voc, pairs = readVocs(datafile)
     print("Read {!s} sentence pairs".format(len(pairs)))
