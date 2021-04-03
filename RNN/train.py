@@ -1,15 +1,21 @@
-import torch
-import torch.nn as nn
-import torch.optim as optim
 import random
 import sys
 import os
 import argparse
+import warnings
 from typing import Union, Dict
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from nltk.translate.bleu_score import sentence_bleu
 
 from build_vocabulary import batch2TrainData, SOS_token, MAX_LENGTH
 from model import EncoderRNN, LuongAttnDecoderRNN
 from chat import GreedySearchDecoder
+
+# TODO: Set warnings back if Cumulative N-Gram BLEU is used
+warnings.filterwarnings("ignore", category=UserWarning)
 
 
 def maskNLLLoss(inp, target, mask):
@@ -76,7 +82,7 @@ def iterate_batches(input_variable, lengths, target_variable, mask, max_target_l
         raise ValueError("'decoder_hidden' was supposed to be assigned a 'torch.Tensor', assignment has failed.")
 
     # Initialize tensors to append decoded words to
-    all_tokens = torch.zeros([0], device=device, dtype=torch.long)
+    all_tokens = torch.zeros([10, 64], device=device, dtype=torch.long)
 
     # Nested functions that manipulate variables of run()
     # ------------------------------------------------------------------------------------------------------------------
@@ -93,7 +99,7 @@ def iterate_batches(input_variable, lengths, target_variable, mask, max_target_l
         # ---- BLEU data ----
         # Obtain most likely word token
         _, token = torch.max(decoder_output, dim=1)
-        all_tokens = torch.cat((all_tokens, token), dim=0)
+        all_tokens[step] = token
 
         # ---- Cross-Entropy data ----
         # No teacher forcing: next input is decoder's own current output
@@ -134,58 +140,83 @@ def iterate_batches(input_variable, lengths, target_variable, mask, max_target_l
     # ------------------------------------------------------------------------------------------------------------------
     if phase_name == "train":
         exec_train()
-    elif phase_name in ["val", "test"]:
+    elif phase_name == "test":
         estim_gen_error()
 
-    return sum(print_losses) / n_totals, all_tokens
+    return [sum(print_losses) / n_totals, all_tokens]
 
 
-def run(voc, encoder: EncoderRNN, decoder: LuongAttnDecoderRNN,
+def run(encoder: EncoderRNN, decoder: LuongAttnDecoderRNN,
         encoder_optimizer, decoder_optimizer, epoch_num: int, batch_size: int, clip: float, phase: Dict[str, dict]):
 
-    def run_phase(curr_phase, phase_name):
+    def run_phase(curr_phase, phase_name, voc):
         losses_curr_epoch = []
+        bleu_curr_epoch = []
         for curr_batch in range(1, curr_phase["bp_ep"] + 1):
-            training_batch = batch2TrainData(curr_phase["voc"],
+            training_batch = batch2TrainData(voc,
                                              [curr_phase["pairs"][j + curr_batch * j] for j in range(batch_size)])
             input_variable, lengths, target_variable, mask, max_target_len = training_batch
             # Run a TRAINING iteration with batch
             loss, all_tokens = iterate_batches(input_variable, lengths, target_variable, mask, max_target_len, encoder,
-                                   decoder, encoder_optimizer, decoder_optimizer, batch_size, clip, phase_name)
+                                               decoder, encoder_optimizer, decoder_optimizer, batch_size, clip,
+                                               phase_name)
             losses_curr_epoch.append(loss)
 
-            # indexes -> words
-            decoded_words = [voc.index2word[token.item()] for token in all_tokens]
+            # -------- Calculate BLEU score in each batch, e.g. 64 sentences --------
+            # indexes -> words -> sentences
+            candidates = [[phase["train"]["voc"].index2word[token.item()] for token in all_tokens[:, i]]
+                             for i in range(all_tokens.shape[1])]
+            # Cumulative N-Gram Score weights
+            # weights = [[0]*4 for _ in candidates]
+            # for i, weight in enumerate(candidates):
+            #     weights[i][0:len(weight)] = [round(1 / min(4, len(candidates[i])), 2)] * min(4, len(candidates[i]))
 
+            # Individual 1-Gram Score weights
+            weights = (1, 0, 0, 0)
+
+            # Retrieve reference sentence
+            refs = [[phase["train"]["voc"].index2word[token.item()] for token in target_variable[:, i]]
+                    for i in range(target_variable.shape[1])]
+            # Filter references, e.g. remove 'EOS' + 'PAD' tokens
+            filt_refs = [[word for word in ref if word not in ["EOS", "PAD"]] for ref in refs]
+            bleu = [sentence_bleu([ref], candidate, weights=weights)
+                    for ref, candidate, weight in zip(filt_refs, candidates, weights)]
+            batch_avg_bleu = sum(bleu) / len(bleu)  # average of the batch
+            bleu_curr_epoch.append(batch_avg_bleu)
 
             print(
                 f"[{phase_name.upper()}]"
                 f" Epoch: {curr_epoch + 1}"
                 f" Percent complete: {round(curr_batch / curr_phase['bp_ep'] * 100, 1)}%;"
-                f" Average loss: {round(loss, 5)}"
+                f" Loss: {round(loss, 5)}"
+                f" BLEU score: {round(batch_avg_bleu, 5)}"
             )
-        return losses_curr_epoch
+        return losses_curr_epoch, bleu_curr_epoch
 
-    # either train+val or solely test
-    for k in phase.keys():
-        phase[k]["bp_ep"] = round(len(phase[k]["pairs"]) // batch_size)
-        phase[k]["losses"] = []  # losses over all epochs
-        print(f"Number of total pairs used for [{k.upper()}]:", len(phase[k]["pairs"]))
-        print(f"Number of batches used for a [{k.upper()}] epoch:", phase[k]["bp_ep"])
+    phase["train"]["bp_ep"] = round(len(phase["train"]["pairs"]) // batch_size)
+    phase["train"]["losses"] = []  # losses over all epochs
+    phase["train"]["bleu"] = []  # bleu scores over all epochs
+    print(f"Number of total pairs used for [TRAIN]:", len(phase["train"]["pairs"]))
+    print(f"Number of batches used for a [TRAIN] epoch:", phase["train"]["bp_ep"])
 
     print(f"Training for {epoch_num} epochs...")
+    c = 0
+    es = 10
+    best_loss = 999999
     for curr_epoch in range(epoch_num):
-        # TODO: ADD EARLY STOPPING
-        # Checking for early stopping criterion in each epoch
-        # if losses_all_epochs[curr_epoch]
-        for k in phase.keys():
-            if k == "train":
-                encoder.train()
-                decoder.train()
-            else:
-                encoder.eval()
-                decoder.eval()
-            phase[k]["losses"].append(run_phase(phase[k], k))
+        losses, bleu_scores = run_phase(phase["train"], "train", phase["train"]["voc"])
+        avg_loss = sum(losses)/len(losses)
+        avg_score = sum(bleu_scores)/len(bleu_scores)
+        phase["train"]["losses"].append(avg_loss)
+        phase["train"]["bleu"].append(avg_score)
+        if avg_loss < best_loss:
+            best_loss = avg_loss
+        else:
+            c += 1
+        if c == es:
+            print("Early stopping criterion has been reached, model is being saved...")
+            return True
+    return None
 
 
 USE_CUDA = torch.cuda.is_available()

@@ -17,9 +17,10 @@ from serialization import save_seq2seq, load_encoder, load_decoder, load_voc, lo
 from chat import GreedySearchDecoder, chat
 
 
-def write_results(run_mode, encoder, encoder_name, decoder_name, dropout, clip, lr, losses):
+def write_results(data_type, run_mode, encoder, encoder_name, decoder_name, dropout, clip, lr, losses):
     os.makedirs("txt_results", exist_ok=True)
     with open(f"txt_results{os.path.sep}"
+              f"{data_type}_"
               f"{run_mode}_"
               f"{encoder_name}{'2' if encoder.bidirectional else '1'}{decoder_name}_"
               f"d{dropout}_gc{clip}_lr{lr}.txt", "w") as output_file:
@@ -28,40 +29,37 @@ def write_results(run_mode, encoder, encoder_name, decoder_name, dropout, clip, 
 
 
 def main():
+
+    phase = {
+        "train": {},
+        "test": {}
+    }
+
     if run_mode == 'train':
-        phase = {
-            "train": {},
-            "val": {},
-        }
         # Load/Assemble voc and pairs
         phase["train"]["voc"], phase["train"]["pairs"] = loadPrepareData(datafiles["train"])
-        phase["val"]["voc"], phase["val"]["pairs"] = loadPrepareData(datafiles["val"])
         # Trim voc and pairs
         phase["train"]["pairs"] = trimRareWords(phase["train"]["voc"], phase["train"]["pairs"], MIN_COUNT)
-        phase["val"]["pairs"] = trimRareWords(phase["val"]["voc"], phase["val"]["pairs"], MIN_COUNT)
-        voc_size = phase["train"]["voc"].num_words + phase["val"]["voc"].num_words
-        print("Combined vocabulary size:", voc_size)
 
         # Shuffle both sets ONCE before the entire training
         random.seed(1)  # seed can be any number
         random.shuffle(phase["train"]["pairs"])
-        random.shuffle(phase["val"]["pairs"])
 
         print('Building training set encoder and decoder ...')
         # Initialize word embeddings for both encoder and decoder
-        embedding = nn.Embedding(voc_size, HIDDEN_SIZE).to(device)
+        embedding = nn.Embedding(phase["train"]["voc"].num_words, HIDDEN_SIZE).to(device)
 
         # Initialize encoder & decoder models
         encoder = EncoderRNN(HIDDEN_SIZE, embedding, ENCODER_N_LAYERS, DROPOUT, gate=encoder_name,
                              bidirectional=BIDIRECTION)
         decoder = LuongAttnDecoderRNN(attn_model, embedding, HIDDEN_SIZE,
-                                      voc_size, DECODER_N_LAYERS, DROPOUT, gate=decoder_name)
-        searcher = GreedySearchDecoder(encoder, decoder)
+                                      phase["train"]["voc"].num_words, DECODER_N_LAYERS, DROPOUT, gate=decoder_name)
 
         # Use appropriate device
         encoder = encoder.to(device)
         decoder = decoder.to(device)
-        # searcher.to(device)
+        encoder.train()
+        decoder.train()
         print('Models built and ready to go!')
 
         # Initialize optimizers
@@ -82,19 +80,19 @@ def main():
                     if isinstance(v, torch.Tensor):
                         state[k] = v.cuda()
 
-        print("*"*40)
-        print(f"Device settings:", device)
-        print("*" * 40)
-
         print("Starting Training!")
-        run(encoder, decoder, encoder_optimizer, decoder_optimizer, EPOCH_NUM, BATCH_SIZE, CLIP, phase)
-        avg_losses_train = [sum(epoch) / len(epoch) for epoch in phase["train"]["losses"]]
-        avg_losses_val = [sum(epoch) / len(epoch) for epoch in phase["val"]["losses"]]
+        save_model = run(encoder, decoder, encoder_optimizer, decoder_optimizer, EPOCH_NUM, BATCH_SIZE, CLIP, phase)
+        if save_model:
+            try:
+                save_seq2seq(encoder, decoder, encoder_name, decoder_name, encoder_optimizer, decoder_optimizer,
+                             phase["train"]["losses"], phase["train"]["bleu"], phase["train"]["voc"],
+                             embedding, DROPOUT, CLIP, LR)
+                print("Model has been saved successfully.")
+            except Exception as error:
+                print("Saving the model has caused an exception:", error)
 
-        # save_seq2seq(encoder, decoder, encoder_name, decoder_name, encoder_optimizer, decoder_optimizer,
-        #              avg_losses_train, voc, embedding, DROPOUT, CLIP, LR, DECODER_LR)
-        write_results("train", encoder, encoder_name, decoder_name, DROPOUT, CLIP, LR, avg_losses_train)
-        write_results("val", encoder, encoder_name, decoder_name, DROPOUT, CLIP, LR, avg_losses_val)
+        write_results("loss", "train", encoder, encoder_name, decoder_name, DROPOUT, CLIP, LR, phase["train"]["losses"])
+        write_results("bleu", "train", encoder, encoder_name, decoder_name, DROPOUT, CLIP, LR, phase["train"]["bleu"])
 
     else:
         # Loading basic objects needed for all 3 of validation, testing and chatting
@@ -119,48 +117,62 @@ def main():
             raise ValueError("Wrong run_mode has been given, options: ['train', 'val', 'test', 'chat']")
 
 
-# Experiments' parameters
-parser = argparse.ArgumentParser()
-# ------------------------------------------------------------------------------------------------------------
-# Basics -- Uppercase arguments
-# ------------------------------------------------------------------------------------------------------------
-parser.add_argument('-M', '--run_mode', help="Type of run mode, options: ['train', 'val', 'test', 'chat']",
-                    type=str, default=None)
-parser.add_argument('-P', '--model_path',
-                    help="RELATIVE path to the model to be used in any run mode different from 'train'",
-                    type=str, default=None, )
-parser.add_argument('-E', '--encoder', help="Type of encoder, options: ['GRU', 'LSTM', 'MogLSTM']",
-                    type=str, default=None)
-parser.add_argument('-ED', '--encoder_direction', help="Number of encoder directions, options: [1, 2]",
-                    type=int, default=None)
-parser.add_argument('-D', '--decoder', help="Type of decoder, options: ['GRU', 'LSTM', 'MogLSTM']",
-                    type=str, default=None)
-parser.add_argument('-O', '--optimizer', help="Type of optimizer, options: ['ADAM', 'SGD']",
-                    type=str, default=None)
-parser.add_argument('-EN', '--epoch_num', help="Number of epochs to run the training for",
-                    type=str, default=100)
-parser.add_argument('-ES', '--early_stopping', help="Whether to use early stopping or not",
-                    type=bool, default=False)
-# ------------------------------------------------------------------------------------------------------------
-# Grid-search (non-dependent of RNN type) -- Lowercase arguments
-# ------------------------------------------------------------------------------------------------------------
-parser.add_argument('-d', '--dropout', help="Value of dropout, can be any float",
-                    type=float, default=0.1)
-parser.add_argument('-gc', '--gradient_clipping', help='Value of gradient clipping',
-                    type=float, default=50.0)
-parser.add_argument('-lr', '--lr',
-                    help="Learning rate of optimization algorithms",
-                    type=float, default=0.0001)
-# TODO: Finish this
-# ------------------------------------------------------------------------------------------------------------
-# Grid-search -- MogLSTM specific parameters -- Lowercase arguments starting with 'm'
-# ------------------------------------------------------------------------------------------------------------
-# parser.add_argument('-md', '--moglstm_dropout', help="value of dropout, can be any float",
-#                     type=float, default=None)
-# ...
-
-# Get all arguments as a dictionary
-args = vars(parser.parse_args())
+# # Experiments' parameters
+# parser = argparse.ArgumentParser()
+# # ------------------------------------------------------------------------------------------------------------
+# # Basics -- Uppercase arguments
+# # ------------------------------------------------------------------------------------------------------------
+# parser.add_argument('-M', '--run_mode', help="Type of run mode, options: ['train', 'test', 'chat']",
+#                     type=str, default=None)
+# parser.add_argument('-P', '--model_path',
+#                     help="RELATIVE path to the model to be used in any run mode different from 'train'",
+#                     type=str, default=None, )
+# parser.add_argument('-E', '--encoder', help="Type of encoder, options: ['GRU', 'LSTM', 'MogLSTM']",
+#                     type=str, default=None)
+# parser.add_argument('-ED', '--encoder_direction', help="Number of encoder directions, options: [1, 2]",
+#                     type=int, default=None)
+# parser.add_argument('-D', '--decoder', help="Type of decoder, options: ['GRU', 'LSTM', 'MogLSTM']",
+#                     type=str, default=None)
+# parser.add_argument('-O', '--optimizer', help="Type of optimizer, options: ['ADAM', 'SGD']",
+#                     type=str, default=None)
+# parser.add_argument('-EN', '--epoch_num', help="Number of epochs to run the training for",
+#                     type=str, default=50)
+# parser.add_argument('-ES', '--early_stopping', help="Whether to use early stopping or not",
+#                     type=bool, default=False)
+# # ------------------------------------------------------------------------------------------------------------
+# # Grid-search (non-dependent of RNN type) -- Lowercase arguments
+# # ------------------------------------------------------------------------------------------------------------
+# parser.add_argument('-d', '--dropout', help="Value of dropout, can be any float",
+#                     type=float, default=0.1)
+# parser.add_argument('-gc', '--gradient_clipping', help='Value of gradient clipping',
+#                     type=float, default=1.0)
+# parser.add_argument('-lr', '--lr',
+#                     help="Learning rate of optimization algorithms",
+#                     type=float, default=0.001)
+# # TODO: Finish this
+# # ------------------------------------------------------------------------------------------------------------
+# # Grid-search -- MogLSTM specific parameters -- Lowercase arguments starting with 'm'
+# # ------------------------------------------------------------------------------------------------------------
+# # parser.add_argument('-md', '--moglstm_dropout', help="value of dropout, can be any float",
+# #                     type=float, default=None)
+# # ...
+#
+# # Get all arguments as a dictionary
+#
+# args = vars(parser.parse_args())
+args = {
+    "run_mode": "train",
+    "model_path": None,
+    "encoder": "GRU",
+    "encoder_direction": 1,
+    "decoder": "GRU",
+    "optimizer": "ADAM",
+    "epoch_num": 50,
+    "early_stopping": False,
+    "dropout": 0.1,
+    "gradient_clipping": 1.0,
+    "lr": 0.001
+}
 
 print(f"\n{'*' * 40}")
 print(f"[RUN_MODE]: {args['run_mode']}")

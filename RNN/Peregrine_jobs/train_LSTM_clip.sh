@@ -9,6 +9,6 @@
 
 module load Python/3.6.4-foss-2018a
 
-python3 run.py -M train -E LSTM -ED 2 -D LSTM -O ADAM -EN 50 -gc 0.5
-python3 run.py -M train -E LSTM -ED 2 -D LSTM -O ADAM -EN 50 -gc 1
-python3 run.py -M train -E LSTM -ED 2 -D LSTM -O ADAM -EN 50 -gc 2
+python3 run.py -M train -E LSTM -ED 2 -D LSTM -O ADAM -EN 100 -gc 0.5
+python3 run.py -M train -E LSTM -ED 2 -D LSTM -O ADAM -EN 100 -gc 1
+python3 run.py -M train -E LSTM -ED 2 -D LSTM -O ADAM -EN 100 -gc 2

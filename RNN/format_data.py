@@ -70,34 +70,30 @@ def extract_and_split_sentence_pairs(conversations: List[dict]) -> Tuple[List[li
     :return: Query and Reply sentence pairs in a list.
     """
     qa_pairs_all = []
-    qa_pairs_split = {"train": [], "val": [], "test": []}
+    qa_pairs_split = {"train": [], "test": []}
     utterances = 442564  # number was retrieved before running the function without split
     count = 0
     for conversation in conversations:
         train_qa_pairs = []
-        val_qa_pairs = []
         test_qa_pairs = []
         qa_pairs = []
         for i in range(0, len(conversation["lines"]) - 1):  # We ignore the last line (no answer for it)
             inputLine = conversation["lines"][i]["text"].strip()  # Query
             targetLine = conversation["lines"][i + 1]["text"].strip()  # Reply
 
-            # Filter wrong samples (if one of the lists is empty); Split the data
+            # Filter wrong samples (if one of the lists is empty) + split the data
             if inputLine and targetLine:
                 pair = [inputLine, targetLine]
                 qa_pairs.append(pair)
-                if count < int(utterances * 0.6):
-                    train_qa_pairs.append(pair)
-                elif int(utterances * 0.6) < count < int(utterances * 0.8):
+                if count < int(utterances * 0.8):
                     train_qa_pairs.append(pair)
                 else:
                     test_qa_pairs.append(pair)
                 count += 2
+
         qa_pairs_all.append(qa_pairs)
         if train_qa_pairs:
             qa_pairs_split["train"].append(train_qa_pairs)
-        elif val_qa_pairs:
-            qa_pairs_split["val"].append(val_qa_pairs)
         else:
             qa_pairs_split["test"].append(test_qa_pairs)
 
@@ -116,20 +112,17 @@ def extract_and_split_conversation_lines(conversations: List[dict]) -> Tuple[lis
     :return: The dataset split into train/val/test sets according to 60%/20%/20% conventional split
     """
     rows_all = []
-    rows_split = {"train": [], "val": [], "test": []}
+    rows_split = {"train": [], "test": []}
     utterances = 304713
     count = 0
     for conversation in conversations:
         train_lines = []
-        val_lines = []
         test_lines = []
         rows = []
         for i in range(len(conversation["lines"])):
             line = conversation["lines"][i]["text"].strip()
             rows.append(line)
-            if count < int(utterances*0.6):
-                train_lines.append(line)
-            elif int(utterances*0.6) < count < int(utterances*0.8):
+            if count < int(utterances*0.8):
                 train_lines.append(line)
             else:
                 test_lines.append(line)
@@ -138,8 +131,6 @@ def extract_and_split_conversation_lines(conversations: List[dict]) -> Tuple[lis
 
         if train_lines:
             rows_split["train"].append(train_lines)
-        elif val_lines:
-            rows_split["val"].append(val_lines)
         else:
             rows_split["test"].append(test_lines)
 
@@ -178,12 +169,11 @@ split_path = os.path.join("data", "train_test_split")
 datafiles = {
     "default": os.path.join(split_path, "formatted_movie_lines.txt"),
     "train": os.path.join(split_path, "formatted_movie_lines_train.txt"),
-    "val": os.path.join(split_path, "formatted_movie_lines_valid.txt"),
     "test": os.path.join(split_path, "formatted_movie_lines_test.txt"),
+
     "qr": os.path.join(split_path, "formatted_movie_QR_lines.txt"),
     "qr_train": os.path.join(split_path, "formatted_movie_QR_lines_train.txt"),
-    "qr_val": os.path.join(split_path, "formatted_movie_QR_lines_valid.txt"),
-    "qr_test": os.path.join(split_path, "formatted_movie_QR_lines_test.txt")
+    "qr_test": os.path.join(split_path, "formatted_movie_QR_lines_test.txt"),
 }
 
 
@@ -203,28 +193,21 @@ if __name__ == '__main__':
     # Sanity check: Number of lines should be distributed in a 60/20/20 ratio
     total_lines_train = sum(
         [len(conversations_split["train"][idx]) for idx, conversation in enumerate(conversations_split["train"])])
-    total_lines_val = sum(
-        [len(conversations_split["val"][idx]) for idx, conversation in enumerate(conversations_split["val"])])
     total_lines_test = sum(
         [len(conversations_split["test"][idx]) for idx, conversation in enumerate(conversations_split["test"])])
     print("total_lines_train:", total_lines_train)
-    print("total_lines_val:", total_lines_val)
     print("total_lines_test:", total_lines_test)
 
     write_data(datafiles["default"], conversations_all, query_reply=False)
     write_data(datafiles["train"], conversations_split["train"], query_reply=False)
-    write_data(datafiles["val"], conversations_split["val"], query_reply=False)
     write_data(datafiles["test"], conversations_split["test"], query_reply=False)
 
     qa_pairs_all, qa_pairs_split = extract_and_split_sentence_pairs(conversations)
     # Sanity check 2
     total_pairs_train = sum(
         [len(qa_pairs_split["train"][idx]) for idx, conversation in enumerate(qa_pairs_split["train"])])
-    total_pairs_val = sum(
-        [len(qa_pairs_split["val"][idx]) for idx, conversation in enumerate(qa_pairs_split["val"])])
     total_pairs_test = sum(
         [len(qa_pairs_split["test"][idx]) for idx, conversation in enumerate(qa_pairs_split["test"])])
     write_data(datafiles["qr"], qa_pairs_all, query_reply=True)
     write_data(datafiles["qr_train"], qa_pairs_split["train"], query_reply=True)
-    write_data(datafiles["qr_val"], qa_pairs_split["val"], query_reply=True)
     write_data(datafiles["qr_test"], qa_pairs_split["test"], query_reply=True)
