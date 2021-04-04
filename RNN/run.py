@@ -1,19 +1,15 @@
 import argparse
 import random
 import os
-import pprint
 import torch
 from torch import nn
 from torch import optim
-from pathos.multiprocessing import ProcessingPool as Pool
-from nltk.translate.bleu_score import sentence_bleu
 
 from format_data import datafiles
 from build_vocabulary import trimRareWords, loadPrepareData, MIN_COUNT
 from train import run
 from model import EncoderRNN, LuongAttnDecoderRNN
-from serialization import save_seq2seq, load_encoder, load_decoder, load_voc, load_embedding, \
-                          load_optim
+from serialization import save_seq2seq, load_encoder, load_decoder, load_voc, load_embedding
 from chat import GreedySearchDecoder, chat
 
 
@@ -117,62 +113,52 @@ def main():
             raise ValueError("Wrong run_mode has been given, options: ['train', 'val', 'test', 'chat']")
 
 
-# # Experiments' parameters
-# parser = argparse.ArgumentParser()
-# # ------------------------------------------------------------------------------------------------------------
-# # Basics -- Uppercase arguments
-# # ------------------------------------------------------------------------------------------------------------
-# parser.add_argument('-M', '--run_mode', help="Type of run mode, options: ['train', 'test', 'chat']",
-#                     type=str, default=None)
-# parser.add_argument('-P', '--model_path',
-#                     help="RELATIVE path to the model to be used in any run mode different from 'train'",
-#                     type=str, default=None, )
-# parser.add_argument('-E', '--encoder', help="Type of encoder, options: ['GRU', 'LSTM', 'MogLSTM']",
-#                     type=str, default=None)
-# parser.add_argument('-ED', '--encoder_direction', help="Number of encoder directions, options: [1, 2]",
-#                     type=int, default=None)
-# parser.add_argument('-D', '--decoder', help="Type of decoder, options: ['GRU', 'LSTM', 'MogLSTM']",
-#                     type=str, default=None)
-# parser.add_argument('-O', '--optimizer', help="Type of optimizer, options: ['ADAM', 'SGD']",
-#                     type=str, default=None)
-# parser.add_argument('-EN', '--epoch_num', help="Number of epochs to run the training for",
-#                     type=str, default=50)
-# parser.add_argument('-ES', '--early_stopping', help="Whether to use early stopping or not",
-#                     type=bool, default=False)
-# # ------------------------------------------------------------------------------------------------------------
-# # Grid-search (non-dependent of RNN type) -- Lowercase arguments
-# # ------------------------------------------------------------------------------------------------------------
-# parser.add_argument('-d', '--dropout', help="Value of dropout, can be any float",
-#                     type=float, default=0.1)
-# parser.add_argument('-gc', '--gradient_clipping', help='Value of gradient clipping',
-#                     type=float, default=1.0)
-# parser.add_argument('-lr', '--lr',
-#                     help="Learning rate of optimization algorithms",
-#                     type=float, default=0.001)
-# # TODO: Finish this
-# # ------------------------------------------------------------------------------------------------------------
-# # Grid-search -- MogLSTM specific parameters -- Lowercase arguments starting with 'm'
-# # ------------------------------------------------------------------------------------------------------------
-# # parser.add_argument('-md', '--moglstm_dropout', help="value of dropout, can be any float",
-# #                     type=float, default=None)
-# # ...
-#
+# Experiments' parameters
+parser = argparse.ArgumentParser()
+# ------------------------------------------------------------------------------------------------------------
+# Basics -- Uppercase arguments
+# ------------------------------------------------------------------------------------------------------------
+parser.add_argument('-M', '--run_mode', help="Type of run mode, options: ['train', 'test', 'chat']",
+                    type=str, default=None)
+parser.add_argument('-P', '--model_path',
+                    help="RELATIVE path to the model to be used in any run mode different from 'train'",
+                    type=str, default=None, )
+parser.add_argument('-E', '--encoder', help="Type of encoder, options: ['GRU', 'LSTM', 'MogLSTM']",
+                    type=str, default=None)
+parser.add_argument('-ED', '--encoder_direction', help="Number of encoder directions, options: [1, 2]",
+                    type=int, default=None)
+parser.add_argument('-D', '--decoder', help="Type of decoder, options: ['GRU', 'LSTM', 'MogLSTM']",
+                    type=str, default=None)
+parser.add_argument('-O', '--optimizer', help="Type of optimizer, options: ['ADAM', 'SGD']",
+                    type=str, default=None)
+parser.add_argument('-EN', '--epoch_num', help="Number of epochs to run the training for",
+                    type=str, default=50)
+# ------------------------------------------------------------------------------------------------------------
+# Grid-search (non-dependent of RNN type) -- Lowercase arguments
+# ------------------------------------------------------------------------------------------------------------
+parser.add_argument('-d', '--dropout', help="Value of dropout, can be any float",
+                    type=float, default=0.1)
+parser.add_argument('-gc', '--gradient_clipping', help='Value of gradient clipping',
+                    type=float, default=1.0)
+parser.add_argument('-lr', '--lr',
+                    help="Learning rate of optimization algorithms",
+                    type=float, default=0.001)
 # # Get all arguments as a dictionary
 #
-# args = vars(parser.parse_args())
-args = {
-    "run_mode": "train",
-    "model_path": None,
-    "encoder": "GRU",
-    "encoder_direction": 1,
-    "decoder": "GRU",
-    "optimizer": "ADAM",
-    "epoch_num": 50,
-    "early_stopping": False,
-    "dropout": 0.1,
-    "gradient_clipping": 1.0,
-    "lr": 0.001
-}
+args = vars(parser.parse_args())
+# args = {
+#     "run_mode": "train",
+#     "model_path": None,
+#     "encoder": "GRU",
+#     "encoder_direction": 1,
+#     "decoder": "GRU",
+#     "optimizer": "ADAM",
+#     "epoch_num": 50,
+#     "early_stopping": False,
+#     "dropout": 0.1,
+#     "gradient_clipping": 1.0,
+#     "lr": 0.001
+# }
 
 print(f"\n{'*' * 40}")
 print(f"[RUN_MODE]: {args['run_mode']}")

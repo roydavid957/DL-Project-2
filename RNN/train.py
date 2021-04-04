@@ -209,6 +209,7 @@ def run(encoder: EncoderRNN, decoder: LuongAttnDecoderRNN,
         avg_score = sum(bleu_scores)/len(bleu_scores)
         phase["train"]["losses"].append(avg_loss)
         phase["train"]["bleu"].append(avg_score)
+
         if avg_loss < best_loss:
             best_loss = avg_loss
         else:
