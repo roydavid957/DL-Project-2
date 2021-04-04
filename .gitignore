@@ -4,6 +4,7 @@ desktop.ini
 Training_outputs
 RNN_models
 RNN_models/
+RNN/data
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
