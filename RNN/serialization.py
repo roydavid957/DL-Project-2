@@ -7,13 +7,13 @@ from torch import optim
 
 
 def save_seq2seq(encoder, decoder, encoder_name, decoder_name, encoder_optimizer, decoder_optimizer,
-                 losses, scores, voc, embedding, DROPOUT, CLIP, LR):
+                 losses, scores, voc, embedding, DROPOUT, CLIP, WD):
     """ Function to save optimally trained (e.g. using early stopping) encoders, decoders, and optimizers altogether """
     folder_path = "RNN_models"
     os.makedirs(folder_path, exist_ok=True)
     file_path = os.path.join(folder_path,
                              f"{encoder_name}{'2' if encoder.bidirectional else '1'}{decoder_name}_d{DROPOUT}"
-                             f"_gc{CLIP}_lr{LR}.pt")
+                             f"_gc{CLIP}_wd{WD}.pt")
     torch.save({
         'en': encoder.state_dict(),
         'de': decoder.state_dict(),

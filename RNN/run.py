@@ -24,9 +24,6 @@ def write_results(data_type, run_mode, encoder, encoder_name, decoder_name, drop
         for loss in losses:
             output_file.write(f"{str(round(loss, 5))}\n")
 
-
-
-
 def main():
 
     phase = {
@@ -87,7 +84,7 @@ def main():
             try:
                 save_seq2seq(encoder, decoder, encoder_name, decoder_name, encoder_optimizer, decoder_optimizer,
                              phase["train"]["losses"], phase["train"]["bleu"], phase["train"]["voc"],
-                             embedding, DROPOUT, CLIP, LR)
+                             embedding, DROPOUT, CLIP, WD)
                 print("Model has been saved successfully.")
             except Exception as error:
                 print("Saving the model has caused an exception:", error)
@@ -160,7 +157,7 @@ args = {
     "decoder": "LSTM",
     "optimizer": "ADAM",
     "epoch_num": 50,
-    "dropout": 0.1,
+    "dropout": 0.2,
     "gradient_clipping": 10.0,
     "lr": 0.001,
     "weight_decay": 1e-6
