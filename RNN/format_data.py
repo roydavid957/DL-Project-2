@@ -1,11 +1,12 @@
 import os
 import re
-import codecs
+import pickle
 import csv
 from typing import List, Dict, Union, Tuple
 import itertools
 import pprint
 
+from build_vocabulary import loadPrepareData, trimRareWords, MIN_COUNT
 
 def loadLines(fileName: str, fields: List[str]) -> Dict[str, Dict[str, str]]:
     """ Splits each line of the file into a dictionary of fields
@@ -62,7 +63,7 @@ def loadConversations(fileName: str, loaded_lines: Dict[str, Dict[str, str]], fi
     return conversations
 
 
-def extract_and_split_sentence_pairs(conversations: List[dict]) -> Tuple[List[list], Dict[str, list]]:
+def extract_and_split_sentence_pairs(conversations: List[dict]) -> List[list]:
     """
     Extracts pairs of sentences from conversations
     :param conversations: A list of the pre-processed rows from movie_conversations.txt,
@@ -70,74 +71,39 @@ def extract_and_split_sentence_pairs(conversations: List[dict]) -> Tuple[List[li
     :return: Query and Reply sentence pairs in a list.
     """
     qa_pairs_all = []
-    qa_pairs_split = {"train": [], "test": []}
-    utterances = 442564  # number was retrieved before running the function without split
-    count = 0
     for conversation in conversations:
-        train_qa_pairs = []
-        test_qa_pairs = []
         qa_pairs = []
         for i in range(0, len(conversation["lines"]) - 1):  # We ignore the last line (no answer for it)
             inputLine = conversation["lines"][i]["text"].strip()  # Query
             targetLine = conversation["lines"][i + 1]["text"].strip()  # Reply
-
-            # Filter wrong samples (if one of the lists is empty) + split the data
+            # Filter wrong samples (if one of the lists is empty)
             if inputLine and targetLine:
-                pair = [inputLine, targetLine]
-                qa_pairs.append(pair)
-                if count < int(utterances * 0.8):
-                    train_qa_pairs.append(pair)
-                else:
-                    test_qa_pairs.append(pair)
-                count += 2
-
+                qa_pairs.append([inputLine, targetLine])
         qa_pairs_all.append(qa_pairs)
-        if train_qa_pairs:
-            qa_pairs_split["train"].append(train_qa_pairs)
-        else:
-            qa_pairs_split["test"].append(test_qa_pairs)
 
     print("", "-" * 20, sep="\n")
     print("Example Query & Reply sentence pairs:")
     print("-" * 20)
     print(qa_pairs_all[0], qa_pairs_all[1])
 
-    return qa_pairs_all, qa_pairs_split
+    return qa_pairs_all
 
 
-def extract_and_split_conversation_lines(conversations: List[dict]) -> Tuple[list, Dict[str, list]]:
+def split(pairs):
     """
-    :param conversations: A list of the pre-processed rows from movie_conversations.txt,
-     a.k.a. output of loadConversations.
-    :return: The dataset split into train/val/test sets according to 60%/20%/20% conventional split
+    :param pairs: Entire dataset
     """
-    rows_all = []
-    rows_split = {"train": [], "test": []}
-    utterances = 304713
-    count = 0
-    for conversation in conversations:
-        train_lines = []
-        test_lines = []
-        rows = []
-        for i in range(len(conversation["lines"])):
-            line = conversation["lines"][i]["text"].strip()
-            rows.append(line)
-            if count < int(utterances*0.8):
-                train_lines.append(line)
-            else:
-                test_lines.append(line)
-            count += 1
-        rows_all.append(rows)
-
-        if train_lines:
-            rows_split["train"].append(train_lines)
+    pair_num = len(pairs)
+    data = {"train": [], "test": []}
+    for idx, pair in enumerate(pairs):
+        if idx < int(pair_num*0.8):
+            data["train"].append(pair)
         else:
-            rows_split["test"].append(test_lines)
+            data["test"].append(pair)
+    return data
 
-    return rows_all, rows_split
 
-
-def write_data(new_file: str, conversations, query_reply):
+def write_data(new_file: str, conversations, query_reply=False):
     """ Write new file from extracted conversations,
      e.g. "formatted_movie_convQR_lines.txt", "formatted_movie_conv_lines.txt """
 
@@ -189,25 +155,12 @@ if __name__ == '__main__':
     conversations = loadConversations(os.path.join(corpus, "movie_conversations.txt"),
                                       lines, MOVIE_CONVERSATIONS_FIELDS)
 
-    conversations_all, conversations_split = extract_and_split_conversation_lines(conversations)
-    # Sanity check: Number of lines should be distributed in a 60/20/20 ratio
-    total_lines_train = sum(
-        [len(conversations_split["train"][idx]) for idx, conversation in enumerate(conversations_split["train"])])
-    total_lines_test = sum(
-        [len(conversations_split["test"][idx]) for idx, conversation in enumerate(conversations_split["test"])])
-    print("total_lines_train:", total_lines_train)
-    print("total_lines_test:", total_lines_test)
-
-    write_data(datafiles["default"], conversations_all, query_reply=False)
-    write_data(datafiles["train"], conversations_split["train"], query_reply=False)
-    write_data(datafiles["test"], conversations_split["test"], query_reply=False)
-
-    qa_pairs_all, qa_pairs_split = extract_and_split_sentence_pairs(conversations)
-    # Sanity check 2
-    total_pairs_train = sum(
-        [len(qa_pairs_split["train"][idx]) for idx, conversation in enumerate(qa_pairs_split["train"])])
-    total_pairs_test = sum(
-        [len(qa_pairs_split["test"][idx]) for idx, conversation in enumerate(qa_pairs_split["test"])])
-    write_data(datafiles["qr"], qa_pairs_all, query_reply=True)
-    write_data(datafiles["qr_train"], qa_pairs_split["train"], query_reply=True)
-    write_data(datafiles["qr_test"], qa_pairs_split["test"], query_reply=True)
+    qr_pairs = extract_and_split_sentence_pairs(conversations)
+    write_data(datafiles["qr"], qr_pairs, query_reply=True)
+    voc, pairs = loadPrepareData(datafiles["qr"])
+    pairs = trimRareWords(voc, pairs, MIN_COUNT)
+    split_pairs = split(pairs)
+    write_data(datafiles["qr_train"], split_pairs["train"], query_reply=False)
+    write_data(datafiles["qr_test"], split_pairs["test"], query_reply=False)
+    with open(f"{os.path.join(split_path, 'voc.pickle')}", "wb") as f:
+        pickle.dump(voc, f)

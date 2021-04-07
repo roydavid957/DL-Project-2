@@ -183,7 +183,6 @@ def run(encoder: EncoderRNN, decoder: LuongAttnDecoderRNN,
                     for ref, candidate, weight in zip(filt_refs, candidates, weights)]
             batch_avg_bleu = sum(bleu) / len(bleu)  # average of the batch
             bleu_curr_epoch.append(batch_avg_bleu)
-
             print(
                 f"[{phase_name.upper()}]"
                 f" Epoch: {curr_epoch + 1}"

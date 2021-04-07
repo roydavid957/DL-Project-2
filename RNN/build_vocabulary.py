@@ -8,7 +8,7 @@ import unicodedata
 import random
 from typing import List, Tuple, Union
 
-from format_data import datafiles
+# from format_data import datafiles
 
 # Default word tokens
 PAD_token = 0  # Used for padding short sentences
@@ -110,6 +110,7 @@ def filterPair(p: List[str]) -> bool:
     :return: True iff both sentences in a pair 'p' are under the MAX_LENGTH threshold
     """
     # Input sequences need to preserve the last word for EOS token
+    print(p)
     return len(p[0].split(' ')) < MAX_LENGTH and len(p[1].split(' ')) < MAX_LENGTH
 
 
@@ -293,25 +294,26 @@ def batch2TrainData(voc: Voc, pair_batch: List[List[str]]) -> Tuple[LongTensor, 
 
     return inp, lengths, output, mask, max_target_len
 
+
 # Print some pairs to validate
 # print("\npairs:")
 # for pair in pairs[:10]:
 #     print(pair)
 
 
-if __name__ == '__main__':
+# if __name__ == '__main__':
     # Load/Assemble voc and pairs
-    voc, pairs = loadPrepareData(datafiles["train"])
-    # Trim voc and pairs
-    pairs = trimRareWords(voc, pairs, MIN_COUNT)
-
-    # Example for validation
-    small_batch_size = 5
-    batches = batch2TrainData(voc, [random.choice(pairs) for _ in range(small_batch_size)])
-    input_variable, lengths, target_variable, mask, max_target_len = batches
-
-    print("input_variable:", input_variable)
-    print("lengths:", lengths)
-    print("target_variable:", target_variable)
-    print("mask:", mask)
-    print("max_target_len:", max_target_len)
+    # voc, pairs = loadPrepareData(datafiles["qr"])
+    # # Trim voc and pairs
+    # pairs = trimRareWords(voc, pairs, MIN_COUNT)
+    #
+    # # Example for validation
+    # small_batch_size = 5
+    # batches = batch2TrainData(voc, [random.choice(pairs) for _ in range(small_batch_size)])
+    # input_variable, lengths, target_variable, mask, max_target_len = batches
+    #
+    # print("input_variable:", input_variable)
+    # print("lengths:", lengths)
+    # print("target_variable:", target_variable)
+    # print("mask:", mask)
+    # print("max_target_len:", max_target_len)
