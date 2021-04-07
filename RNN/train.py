@@ -183,13 +183,13 @@ def run(encoder: EncoderRNN, decoder: LuongAttnDecoderRNN,
                     for ref, candidate, weight in zip(filt_refs, candidates, weights)]
             batch_avg_bleu = sum(bleu) / len(bleu)  # average of the batch
             bleu_curr_epoch.append(batch_avg_bleu)
-            print(
-                f"[{phase_name.upper()}]"
-                f" Epoch: {curr_epoch + 1}"
-                f" Percent complete: {round(curr_batch / curr_phase['bp_ep'] * 100, 1)}%;"
-                f" Loss: {round(loss, 5)}"
-                f" BLEU score: {round(batch_avg_bleu, 5)}"
-            )
+            # print(
+            #     f"[{phase_name.upper()}]"
+            #     f" Epoch: {curr_epoch + 1}"
+            #     f" Percent complete: {round(curr_batch / curr_phase['bp_ep'] * 100, 1)}%;"
+            #     f" Loss: {round(loss, 5)}"
+            #     f" BLEU score: {round(batch_avg_bleu, 5)}"
+            # )
         return losses_curr_epoch, bleu_curr_epoch
 
     phase["train"]["bp_ep"] = round(len(phase["train"]["pairs"]) // batch_size)
@@ -208,6 +208,12 @@ def run(encoder: EncoderRNN, decoder: LuongAttnDecoderRNN,
         avg_score = sum(bleu_scores)/len(bleu_scores)
         phase["train"]["losses"].append(avg_loss)
         phase["train"]["bleu"].append(avg_score)
+        print(
+            f"[TRAIN]"
+            f" Epoch: {curr_epoch + 1}"
+            f" Loss: {round(avg_loss, 5)}"
+            f" BLEU score: {round(avg_score, 5)}"
+        )
 
         if avg_loss < best_loss:
             best_loss = avg_loss

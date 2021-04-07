@@ -14,13 +14,13 @@ from serialization import save_seq2seq, load_encoder, load_decoder, load_voc, lo
 from chat import GreedySearchDecoder, chat
 
 
-def write_results(data_type, run_mode, encoder, encoder_name, decoder_name, dropout, clip, lr, losses):
+def write_results(data_type, run_mode, encoder, encoder_name, decoder_name, dropout, clip, wd, losses):
     os.makedirs("txt_results", exist_ok=True)
     with open(f"txt_results{os.path.sep}"
               f"{data_type}_"
               f"{run_mode}_"
               f"{encoder_name}{'2' if encoder.bidirectional else '1'}{decoder_name}_"
-              f"d{dropout}_gc{clip}_lr{lr}.txt", "w") as output_file:
+              f"d{dropout}_gc{clip}_wd{wd}.txt", "w") as output_file:
         for loss in losses:
             output_file.write(f"{str(round(loss, 5))}\n")
 
@@ -65,8 +65,8 @@ def main():
         # Initialize optimizers
         print('Building optimizers ...')
         if args.get('optimizer') == "ADAM":
-            encoder_optimizer = optim.Adam(encoder.parameters(), lr=LR)
-            decoder_optimizer = optim.Adam(decoder.parameters(), lr=LR)
+            encoder_optimizer = optim.Adam(encoder.parameters(), lr=LR, weight_decay=WD)
+            decoder_optimizer = optim.Adam(decoder.parameters(), lr=LR, weight_decay=WD)
         elif args.get('optimizer') == "SGD":
             encoder_optimizer = optim.SGD(encoder.parameters(), lr=LR)
             decoder_optimizer = optim.SGD(decoder.parameters(), lr=LR)
@@ -92,8 +92,8 @@ def main():
             except Exception as error:
                 print("Saving the model has caused an exception:", error)
 
-        write_results("loss", "train", encoder, encoder_name, decoder_name, DROPOUT, CLIP, LR, phase["train"]["losses"])
-        write_results("bleu", "train", encoder, encoder_name, decoder_name, DROPOUT, CLIP, LR, phase["train"]["bleu"])
+        write_results("loss", "train", encoder, encoder_name, decoder_name, DROPOUT, CLIP, WD, phase["train"]["losses"])
+        write_results("bleu", "train", encoder, encoder_name, decoder_name, DROPOUT, CLIP, WD, phase["train"]["bleu"])
 
     else:
         # Loading basic objects needed for all 3 of validation, testing and chatting
@@ -155,14 +155,15 @@ def main():
 args = {
     "run_mode": "train",
     "model_path": None,
-    "encoder": "MogLSTM",
+    "encoder": "LSTM",
     "encoder_direction": 2,
-    "decoder": "MogLSTM",
+    "decoder": "LSTM",
     "optimizer": "ADAM",
     "epoch_num": 50,
     "dropout": 0.1,
     "gradient_clipping": 10.0,
-    "lr": 0.001
+    "lr": 0.001,
+    "weight_decay": 1e-6
 }
 
 print(f"\n{'*' * 40}")
@@ -193,6 +194,7 @@ BIDIRECTION = True
 CLIP = float(args.get('gradient_clipping'))
 LR = float(args.get('lr'))
 DROPOUT = float(args.get('dropout'))
+WD = float(args.get("weight_decay"))
 
 main()
 
