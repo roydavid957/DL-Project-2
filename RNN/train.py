@@ -3,6 +3,7 @@ import sys
 import os
 import argparse
 import warnings
+import time
 from typing import Union, Dict
 
 import torch
@@ -203,7 +204,9 @@ def run(encoder: EncoderRNN, decoder: LuongAttnDecoderRNN,
     es = 10
     best_loss = 999999
     for curr_epoch in range(epoch_num):
+        start = time.time()
         losses, bleu_scores = run_phase(phase["train"], "train", phase["train"]["voc"])
+        end = time.time()
         avg_loss = sum(losses)/len(losses)
         avg_score = sum(bleu_scores)/len(bleu_scores)
         phase["train"]["losses"].append(avg_loss)
@@ -213,6 +216,7 @@ def run(encoder: EncoderRNN, decoder: LuongAttnDecoderRNN,
             f" Epoch: {curr_epoch + 1}"
             f" Loss: {round(avg_loss, 5)}"
             f" BLEU score: {round(avg_score, 5)}"
+            f" {round(end-start,2)} s"
         )
 
         if avg_loss < best_loss:
