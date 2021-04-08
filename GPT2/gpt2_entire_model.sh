@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --time=03:00:00
+#SBATCH --time=02:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=8
-#SBATCH --job-name=res18_Adam_exp
+#SBATCH --job-name=gpt2_entire_model
 #SBATCH --mem=8000
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:v100:1
-#SBATCH --output=res18_Adam_exp.txt
+#SBATCH --output=gpt2_entire_model_result.txt
 
 module load Python
 
-python3 GPT2_movie_dialogue.py
+python3 gpt2_entire_model.py
