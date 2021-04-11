@@ -20,9 +20,9 @@ Open the terminal within RNN/ and specify the desired configuration with the arg
 ## How to RUN (BERT):
 - Download the training data : formatted_movie_lines_train.txt
 - Download the supporting scripts : 
-     * finetune_on_pregenerated.py
-     * pregenerate_training_data.py
-     * simple_lm_finetuning.py
+   * finetune_on_pregenerated.py
+   * pregenerate_training_data.py
+   * simple_lm_finetuning.py
 - Open the DL_BERT_GEN.ipynb notebook and run all (entire script will take 3-5 hours on Google Colab)
 - Outputs a BERT model fine-tuned on training data
 
