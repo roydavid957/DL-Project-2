@@ -14,5 +14,5 @@ Open the terminal within RNN/ and specify the desired configuration with the arg
 - Open the terminal within RNN/ and run plot.py accompanied by the following arguments:
     * the datafile,
     * and the metric with the modified (relative to default settings) hyperparameters in the experiment
-- Example: python3 plot.py -p "txt_results/bleu_train_GRU2GRU_d0.1_gc1.0_lr0.001.txt" -n "bleu_gc1.0"
+- Example: python3 plot.py -p "txt_results/GRU_experiments/bleu_train_GRU2GRU_d0.1_gc1.0_lr0.001.txt" -n "bleu_gc1.0"
 - output: GRU2GRU_bleu_gc1.0.png
