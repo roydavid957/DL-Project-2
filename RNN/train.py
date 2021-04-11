@@ -85,7 +85,7 @@ def iterate_batches(input_variable, lengths, target_variable, mask, max_target_l
     # Initialize tensors to append decoded words to
     all_tokens = torch.zeros([10, 64], device=device, dtype=torch.long)
 
-    # Nested functions that manipulate variables of run()
+    # Nested functions that manipulate variables of run()/iterate_batches()
     # ------------------------------------------------------------------------------------------------------------------
     def forward_decoder(step: int):
         """ Forward pass through decoder and calculate loss thereof. Used by training/validation/testing identically."""
@@ -113,7 +113,7 @@ def iterate_batches(input_variable, lengths, target_variable, mask, max_target_l
         print_losses.append(mask_loss.item() * nTotal)
         n_totals += nTotal
 
-    def exec_train():  # renamed from train() to exec_train() to avoid collision with PyTorch's train()
+    def exec_train():
         """ Training function used to learn the parameters of the model(s). """
         # Ensure dropout layers are in train mode
         # Zero gradients
@@ -132,7 +132,7 @@ def iterate_batches(input_variable, lengths, target_variable, mask, max_target_l
         decoder_optimizer.step()
 
     def estim_gen_error():
-        """ Function for estimating generalization error either on the validation or on the test set,
+        """ Function for estimating generalization error,
          thus both the hyperparameter choices and the reported generalization errors are obtained from here. """
         # Forward batch of sequences through decoder one time step at a time
         for step in range(max_target_len):
@@ -187,7 +187,6 @@ def run(encoder: EncoderRNN, decoder: LuongAttnDecoderRNN,
             bleu_curr_epoch.append(batch_avg_bleu)
         return losses_curr_epoch, bleu_curr_epoch
 
-<<<<<<< HEAD
     if evaluation:
         for k in phase.keys():
             phase[k]["bp_ep"] = round(len(phase[k]["pairs"]) // batch_size)
@@ -211,9 +210,11 @@ def run(encoder: EncoderRNN, decoder: LuongAttnDecoderRNN,
         es = 10
         best_loss = 999999
         for curr_epoch in range(epoch_num):
+            start = time.time()
             losses, bleu_scores = run_phase(phase["train"], "train", phase["train"]["voc"])
-            avg_loss = sum(losses)/len(losses)
-            avg_score = sum(bleu_scores)/len(bleu_scores)
+            end = time.time()
+            avg_loss = sum(losses) / len(losses)
+            avg_score = sum(bleu_scores) / len(bleu_scores)
             phase["train"]["losses"].append(avg_loss)
             phase["train"]["bleu"].append(avg_score)
             print(
@@ -221,6 +222,7 @@ def run(encoder: EncoderRNN, decoder: LuongAttnDecoderRNN,
                 f" Epoch: {curr_epoch + 1}"
                 f" Loss: {round(avg_loss, 5)}"
                 f" BLEU score: {round(avg_score, 5)}"
+                f" {round(end - start, 2)} s"
             )
             if avg_loss < best_loss:
                 best_loss = avg_loss
@@ -229,41 +231,6 @@ def run(encoder: EncoderRNN, decoder: LuongAttnDecoderRNN,
             if c == es:
                 print("Early stopping criterion has been reached, model is being saved...")
                 return True
-=======
-    phase["train"]["bp_ep"] = round(len(phase["train"]["pairs"]) // batch_size)
-    phase["train"]["losses"] = []  # losses over all epochs
-    phase["train"]["bleu"] = []  # bleu scores over all epochs
-    print(f"Number of total pairs used for [TRAIN]:", len(phase["train"]["pairs"]))
-    print(f"Number of batches used for a [TRAIN] epoch:", phase["train"]["bp_ep"])
-
-    print(f"Training for {epoch_num} epochs...")
-    c = 0
-    es = 10
-    best_loss = 999999
-    for curr_epoch in range(epoch_num):
-        start = time.time()
-        losses, bleu_scores = run_phase(phase["train"], "train", phase["train"]["voc"])
-        end = time.time()
-        avg_loss = sum(losses)/len(losses)
-        avg_score = sum(bleu_scores)/len(bleu_scores)
-        phase["train"]["losses"].append(avg_loss)
-        phase["train"]["bleu"].append(avg_score)
-        print(
-            f"[TRAIN]"
-            f" Epoch: {curr_epoch + 1}"
-            f" Loss: {round(avg_loss, 5)}"
-            f" BLEU score: {round(avg_score, 5)}"
-            f" {round(end-start,2)} s"
-        )
-
-        if avg_loss < best_loss:
-            best_loss = avg_loss
-        else:
-            c += 1
-        if c == es:
-            print("Early stopping criterion has been reached, model is being saved...")
-            return True
->>>>>>> c5bf071eef0cbf892b3f89f49fcf20bd796104b9
     return None
 
 
