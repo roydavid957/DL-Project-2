@@ -17,5 +17,15 @@ Open the terminal within RNN/ and specify the desired configuration with the arg
 - Example: python3 plot.py -p "txt_results/GRU_experiments/bleu_train_GRU2GRU_d0.1_gc1.0_lr0.001.txt" -n "bleu_gc1.0"
 - output: GRU2GRU_bleu_gc1.0.png
 
+## How to RUN (BERT):
+- Download the training data : formatted_movie_lines_train.txt
+- Download the supporting scripts : 
+     * finetune_on_pregenerated.py
+     * pregenerate_training_data.py
+     * simple_lm_finetuning.py
+- Open the DL_BERT_GEN.ipynb notebook and run all
+- Outputs a BERT model fine-tuned on training data
+
+
 ## Qualitatice analysis:
 ![alt text](https://github.com/roydavid957/DL-Project-2/blob/main/qas.png)
