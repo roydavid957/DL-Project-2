@@ -18,4 +18,4 @@ Open the terminal within RNN/ and specify the desired configuration with the arg
 - output: GRU2GRU_bleu_gc1.0.png
 
 ## Qualitatice analysis:
-1[alt text](https://github.com/roydavid957/DL-Project-2/blob/main/qas.png)
+![alt text](https://github.com/roydavid957/DL-Project-2/blob/main/qas.png)
