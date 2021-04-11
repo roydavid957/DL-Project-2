@@ -109,8 +109,6 @@ def filterPair(p: List[str]) -> bool:
             - Example: ['the money s right here ! get the key !', 'no ! you get it !']
     :return: True iff both sentences in a pair 'p' are under the MAX_LENGTH threshold
     """
-    # Input sequences need to preserve the last word for EOS token
-    print(p)
     return len(p[0].split(' ')) < MAX_LENGTH and len(p[1].split(' ')) < MAX_LENGTH
 
 

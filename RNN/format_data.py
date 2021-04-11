@@ -23,11 +23,11 @@ def loadLines(fileName: str, fields: List[str]) -> Dict[str, Dict[str, str]]:
             lines[lineObj['lineID']] = lineObj
 
         # Sanity check
-        lines_head = dict(itertools.islice(lines.items(), 2))
-        print("", "-" * 20, sep="\n")
-        print("Lines example:")
-        print("-" * 20)
-        pprint.pprint(lines_head)
+        # lines_head = dict(itertools.islice(lines.items(), 2))
+        # print("", "-" * 20, sep="\n")
+        # print("Lines example:")
+        # print("-" * 20)
+        # pprint.pprint(lines_head)
 
     return lines
 
@@ -56,10 +56,10 @@ def loadConversations(fileName: str, loaded_lines: Dict[str, Dict[str, str]], fi
             for lineId in lineIds:
                 convObj["lines"].append(loaded_lines[lineId])
             conversations.append(convObj)
-        print("", "-" * 20, sep="\n")
-        print("Conversation example, e.g. first row from movie_conversations.txt:")
-        print("-" * 20)
-        pprint.pprint(conversations[0])
+        # print("", "-" * 20, sep="\n")
+        # print("Conversation example, e.g. first row from movie_conversations.txt:")
+        # print("-" * 20)
+        # pprint.pprint(conversations[0])
     return conversations
 
 
@@ -81,10 +81,10 @@ def extract_and_split_sentence_pairs(conversations: List[dict]) -> List[list]:
                 qa_pairs.append([inputLine, targetLine])
         qa_pairs_all.append(qa_pairs)
 
-    print("", "-" * 20, sep="\n")
-    print("Example Query & Reply sentence pairs:")
-    print("-" * 20)
-    print(qa_pairs_all[0], qa_pairs_all[1])
+    # print("", "-" * 20, sep="\n")
+    # print("Example Query & Reply sentence pairs:")
+    # print("-" * 20)
+    # print(qa_pairs_all[0], qa_pairs_all[1])
 
     return qa_pairs_all
 

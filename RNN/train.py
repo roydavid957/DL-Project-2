@@ -3,6 +3,7 @@ import sys
 import os
 import argparse
 import warnings
+import time
 from typing import Union, Dict
 
 import torch
@@ -24,8 +25,8 @@ def maskNLLLoss(inp, target, mask):
      that correspond to a 1 in the mask tensor.
     :param inp: Padded output of the decoder.
     :param target: Teacher value.
-    :param mask:
-    :return:
+    :param mask: Binary matrix.
+    :return: Scalar loss value.
     """
     nTotal = mask.sum()
     crossEntropy = -torch.log(torch.gather(inp, 1, target.view(-1, 1)).squeeze(1))
@@ -147,7 +148,8 @@ def iterate_batches(input_variable, lengths, target_variable, mask, max_target_l
 
 
 def run(encoder: EncoderRNN, decoder: LuongAttnDecoderRNN,
-        encoder_optimizer, decoder_optimizer, epoch_num: int, batch_size: int, clip: float, phase: Dict[str, dict]):
+        encoder_optimizer, decoder_optimizer, epoch_num: int, batch_size: int, clip: float, phase: Dict[str, dict],
+        evaluation=False):
 
     def run_phase(curr_phase, phase_name, voc):
         losses_curr_epoch = []
@@ -183,15 +185,51 @@ def run(encoder: EncoderRNN, decoder: LuongAttnDecoderRNN,
                     for ref, candidate, weight in zip(filt_refs, candidates, weights)]
             batch_avg_bleu = sum(bleu) / len(bleu)  # average of the batch
             bleu_curr_epoch.append(batch_avg_bleu)
-            # print(
-            #     f"[{phase_name.upper()}]"
-            #     f" Epoch: {curr_epoch + 1}"
-            #     f" Percent complete: {round(curr_batch / curr_phase['bp_ep'] * 100, 1)}%;"
-            #     f" Loss: {round(loss, 5)}"
-            #     f" BLEU score: {round(batch_avg_bleu, 5)}"
-            # )
         return losses_curr_epoch, bleu_curr_epoch
 
+<<<<<<< HEAD
+    if evaluation:
+        for k in phase.keys():
+            phase[k]["bp_ep"] = round(len(phase[k]["pairs"]) // batch_size)
+            phase[k]["losses"] = []  # losses over a SINGLE epoch
+            phase[k]["bleu"] = []  # bleu scores over a SINGLE epoch
+            print(f"Number of total pairs used for [{k.upper()}]:", len(phase[k]["pairs"]))
+            print(f"Number of batches used for a [{k.upper()}] epoch:", phase[k]["bp_ep"])
+            losses, bleu_scores = run_phase(phase[k], "test", phase["train"]["voc"])
+            avg_loss = sum(losses) / len(losses)
+            avg_score = sum(bleu_scores) / len(bleu_scores)
+            phase[k]["losses"].append(avg_loss)
+            phase[k]["bleu"].append(avg_score)
+    else:
+        phase["train"]["bp_ep"] = round(len(phase["train"]["pairs"]) // batch_size)
+        phase["train"]["losses"] = []  # losses over all epochs
+        phase["train"]["bleu"] = []  # bleu scores over all epochs
+        print(f"Number of total pairs used for [TRAIN]:", len(phase["train"]["pairs"]))
+        print(f"Number of batches used for a [TRAIN] epoch:", phase["train"]["bp_ep"])
+        print(f"Training for {epoch_num} epochs...")
+        c = 0
+        es = 10
+        best_loss = 999999
+        for curr_epoch in range(epoch_num):
+            losses, bleu_scores = run_phase(phase["train"], "train", phase["train"]["voc"])
+            avg_loss = sum(losses)/len(losses)
+            avg_score = sum(bleu_scores)/len(bleu_scores)
+            phase["train"]["losses"].append(avg_loss)
+            phase["train"]["bleu"].append(avg_score)
+            print(
+                f"[TRAIN]"
+                f" Epoch: {curr_epoch + 1}"
+                f" Loss: {round(avg_loss, 5)}"
+                f" BLEU score: {round(avg_score, 5)}"
+            )
+            if avg_loss < best_loss:
+                best_loss = avg_loss
+            else:
+                c += 1
+            if c == es:
+                print("Early stopping criterion has been reached, model is being saved...")
+                return True
+=======
     phase["train"]["bp_ep"] = round(len(phase["train"]["pairs"]) // batch_size)
     phase["train"]["losses"] = []  # losses over all epochs
     phase["train"]["bleu"] = []  # bleu scores over all epochs
@@ -203,7 +241,9 @@ def run(encoder: EncoderRNN, decoder: LuongAttnDecoderRNN,
     es = 10
     best_loss = 999999
     for curr_epoch in range(epoch_num):
+        start = time.time()
         losses, bleu_scores = run_phase(phase["train"], "train", phase["train"]["voc"])
+        end = time.time()
         avg_loss = sum(losses)/len(losses)
         avg_score = sum(bleu_scores)/len(bleu_scores)
         phase["train"]["losses"].append(avg_loss)
@@ -213,6 +253,7 @@ def run(encoder: EncoderRNN, decoder: LuongAttnDecoderRNN,
             f" Epoch: {curr_epoch + 1}"
             f" Loss: {round(avg_loss, 5)}"
             f" BLEU score: {round(avg_score, 5)}"
+            f" {round(end-start,2)} s"
         )
 
         if avg_loss < best_loss:
@@ -222,6 +263,7 @@ def run(encoder: EncoderRNN, decoder: LuongAttnDecoderRNN,
         if c == es:
             print("Early stopping criterion has been reached, model is being saved...")
             return True
+>>>>>>> c5bf071eef0cbf892b3f89f49fcf20bd796104b9
     return None
 
 

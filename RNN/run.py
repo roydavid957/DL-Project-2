@@ -24,6 +24,7 @@ def write_results(data_type, run_mode, encoder, encoder_name, decoder_name, drop
         for loss in losses:
             output_file.write(f"{str(round(loss, 5))}\n")
 
+
 def main():
 
     phase = {
@@ -78,8 +79,8 @@ def main():
                         state[k] = v.cuda()
 
         print("Starting Training!")
-        save_model = run(encoder, decoder, encoder_optimizer, decoder_optimizer, EPOCH_NUM, BATCH_SIZE, CLIP, phase)
-        save_model = True
+        save_model = run(encoder, decoder, encoder_optimizer, decoder_optimizer, EPOCH_NUM, BATCH_SIZE, CLIP, phase,
+                         evaluation=True)
         if save_model:
             try:
                 save_seq2seq(encoder, decoder, encoder_name, decoder_name, encoder_optimizer, decoder_optimizer,
@@ -105,17 +106,35 @@ def main():
         decoder = decoder.to(device)
 
         if run_mode == "test":
-            pass
+            with open(datafiles["qr_train"], "r") as file_obj:
+                for line in file_obj:
+                    phase["train"]["pairs"].append(line.split("\n")[0].split("\t"))
+            with open(datafiles["qr_test"], "r") as file_obj:
+                for line in file_obj:
+                    phase["test"]["pairs"].append(line.split("\n")[0].split("\t"))
+            with open(f"{os.path.join(split_path, 'voc.pickle')}", "rb") as f:
+                phase["train"]["voc"] = pickle.load(f)
+            _ = run(encoder, decoder, None, None, EPOCH_NUM, BATCH_SIZE, CLIP, phase, evaluation=True)
+            write_results("loss", "train", encoder, encoder_name, decoder_name, DROPOUT, CLIP, WD,
+                          phase["train"]["losses"])
+            write_results("bleu", "train", encoder, encoder_name, decoder_name, DROPOUT, CLIP, WD,
+                          phase["train"]["bleu"])
+
+            write_results("loss", "test", encoder, encoder_name, decoder_name, DROPOUT, CLIP, WD,
+                          phase["test"]["losses"])
+            write_results("bleu", "test", encoder, encoder_name, decoder_name, DROPOUT, CLIP, WD,
+                          phase["test"]["bleu"])
+
         elif run_mode == "chat":
             # Initialize search module
             searcher = GreedySearchDecoder(encoder, decoder)
             chat(searcher, voc)
 
         else:
-            raise ValueError("Wrong run_mode has been given, options: ['train', 'val', 'test', 'chat']")
+            raise ValueError("Wrong run_mode has been given, options: ['train', 'test', 'chat']")
 
 
-# # Experiments' parameters
+# # Experiments' parameters for PEREGRINE runs
 # parser = argparse.ArgumentParser()
 # # ------------------------------------------------------------------------------------------------------------
 # # Basics -- Uppercase arguments
@@ -150,17 +169,17 @@ def main():
 # args = vars(parser.parse_args())
 
 args = {
-    "run_mode": "train",
-    "model_path": None,
-    "encoder": "LSTM",
+    "run_mode": "test",
+    "model_path": "C:\\Users\\varga\\Desktop\\DL-Project-2\\RNN\\RNN_models\\MogLSTM2MogLSTM_d0.1_gc10.0_lr0.001.pt",
+    "encoder": "MogLSTM",
     "encoder_direction": 2,
-    "decoder": "LSTM",
+    "decoder": "MogLSTM",
     "optimizer": "ADAM",
     "epoch_num": 50,
-    "dropout": 0.2,
+    "dropout": 0.1,
     "gradient_clipping": 10.0,
     "lr": 0.001,
-    "weight_decay": 1e-6
+    "weight_decay": 1e-5
 }
 
 print(f"\n{'*' * 40}")
@@ -194,4 +213,6 @@ DROPOUT = float(args.get('dropout'))
 WD = float(args.get("weight_decay"))
 
 main()
+
+
 
