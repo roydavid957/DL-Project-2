@@ -26,6 +26,13 @@ Open the terminal within RNN/ and specify the desired configuration with the arg
 - Open the DL_BERT_GEN.ipynb notebook and run all (entire script will take 3-5 hours on Google Colab)
 - Outputs a BERT model fine-tuned on training data
 
+## How to run (GPT-2)
+- Downloading the training datasets:
+      * formatted_movie_lines_train.txt
+      * formatted_movie_lines_QR_train.txt
+- Download the Python scripts in the GPT2 folder
+- (optional) Download the .sh files if you want to run them on Peregrine
+- Run the Python script or the Shell script
 
-## Qualitatice analysis:
+## Qualitative analysis:
 ![alt text](https://github.com/roydavid957/DL-Project-2/blob/main/qas.png)
